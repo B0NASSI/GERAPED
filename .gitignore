@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+GERAPED - Instalador/
+installer/output/
+installer/release/
+logs/
+historico.json
+rascunho.json
+preferencias.json
+.pytest_cache/

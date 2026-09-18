@@ -1,0 +1,42 @@
+GERAPED - Gerador de Pedidos
+Instruções de instalação
+
+
+COMO INSTALAR
+
+1. Baixe o arquivo "GERAPED Setup v1.0.exe".
+
+2. Inicie o instalador:
+   - Se o Windows mostrar um aviso azul ("O Windows protegeu o
+     computador"), clique em "Mais informações" e depois em
+     "Executar assim mesmo" — é só o aviso padrão para programas
+     baixados da internet.
+
+3. Siga o assistente (Avançar, Avançar, Instalar). Deixe marcada a
+   opção "Criar um atalho na área de trabalho".
+
+4. Ao final, clique em "Concluir". Vai aparecer um ícone "GERAPED" na
+   área de trabalho.
+
+
+COMO USAR
+
+- Abra sempre pelo ícone "GERAPED" da área de trabalho.
+- Esse ícone abre o "GERAPED Launcher", que checa sozinho se existe uma
+  versão mais nova disponível:
+    - Se não houver, o programa abre direto, sem nenhuma tela extra.
+    - Se houver uma atualização, aparece uma janelinha baixando e
+      aplicando automaticamente (leva poucos segundos) — não precisa
+      fazer nada, é só aguardar. Ao terminar, o GERAPED já abre
+      atualizado.
+- Dentro do programa, o botão "Notas de atualização" mostra o que
+  mudou na versão instalada.
+
+
+COMO DESINSTALAR (se precisar)
+
+Painel de Controle (ou Configurações) → Aplicativos → procure
+"GERAPED — Gerador de Pedidos" → Desinstalar.
+
+
+Qualquer dúvida ou erro, me avise.

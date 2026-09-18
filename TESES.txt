@@ -1,0 +1,24 @@
+1. Acidente de trajeto= TRAJETO
+2. Restabelecimento de benefício anterior = 60 DIAS
+3. Acidente ocorrido em outro estabelecimento= OUTRO ESTABELECIMENTO
+4. Ausência de nexo causal e concausalidade afastados por decisão judicial= NEXO AFASTADO
+5. Acidente sem relação com a empresa Autora= OUTRA EMPRESA
+6. Benefício de natureza previdenciária= BENEFÍCIO PREVIDENCIÁRIO
+7. Concomitância com outro benefício (com escolha de: auxílio por incapacidade temporária / aposentadoria / auxílio-acidente)= CONCOMITANTE
+8. Acidente anterior a abril de 2007= PRÉ-FAP
+9. Sobreposição e concomitância de benefícios= SOBREPOSIÇÃO
+
+Novas a implementar:
+10. Convertido  (TEM ALGUNS TIPOS - em B31, B36 ou B32 -, IGUAL O CONCOMITANTE)= CONVERTIDO
+11. Rotatividade= ROTATIVIDADE
+12. Erro na massa salarial= ERRO DE MASSA SALARIAL
+13. Erro no número médio de vínculos= ERRO DE VÍNCULOS
+14. Prescrição quinquenal= PRESCRIÇÃO QUINQUENAL
+15. Contestação administrativa= CONTESTAÇÃO ADMINISTRATIVA
+16. CAT não vinculada= CAT NÃO VINCULADA
+17. DIB=DCB= DIB=DCB
+18. Benefício revogado= BENEFÍCIO CANCELADO/REVOGADO
+19. Custo cessado (TEM ALGUNS TIPOS, IGUAL O CONCOMITANTE)= CUSTO CESSADO
+20. Divergência de benefício concedido e o implantado= ERRO DE IMPLANTAÇÃO
+
+
