@@ -1,5 +1,5 @@
 #define MyAppName "GERAPED — Gerador de Pedidos"
-#define MyAppVersion "1.0"
+#define MyAppVersion "1.2"
 #define MyAppPublisher "Rodriguez & Sousa Advogados Associados"
 #define MyAppExeName "GERAPED Launcher.exe"
 #define SourceDir "C:\Users\Pichau\Desktop\CODE\CLAUDE CODE\GeradorPedidoFAP\GERAPED - Instalador"
@@ -16,7 +16,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=output
-OutputBaseFilename=GERAPED Setup v1.0
+OutputBaseFilename=GERAPED Setup v{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

@@ -73,13 +73,15 @@ def validar_beneficios_subsidiaria(numeros_com_especie, quantidade_principal):
     teses subsidiárias diferentes é permitido - representa alternativas para o mesmo
     benefício):
 
-    - Com mais de um benefício informado, o número de cada um é obrigatório (senão o texto
-      gerado repete a mesma espécie várias vezes sem identificar qual benefício é qual,
-      ex: "dos benefícios B91, B91 e B91").
+    - Ao adicionar qualquer benefício (mesmo um só), o número dele é obrigatório - senão o
+      texto gerado repete a espécie sem identificar qual benefício é qual, ex: "do
+      benefício B91" sem dizer qual dos vários B91 do pedido principal. Não adicionar
+      nenhum benefício é o caminho normal para "todos os benefícios desta tese
+      subsidiária" (ver beneficio_subsidiario_pode_herdar_do_principal).
     - Uma tese subsidiária, isoladamente, não pode citar mais benefícios do que a
       quantidade do pedido principal (não existem mais benefícios do que isso)."""
-    if len(numeros_com_especie) > 1 and any(numero is None for _, numero in numeros_com_especie):
-        raise ValueError('com mais de um benefício, informe o número de cada um deles.')
+    if numeros_com_especie and any(numero is None for _, numero in numeros_com_especie):
+        raise ValueError('ao adicionar um benefício, informe o número dele.')
     if quantidade_principal is not None and len(numeros_com_especie) > quantidade_principal:
         raise ValueError(
             f'informou {len(numeros_com_especie)} benefícios, mas o pedido principal tem '

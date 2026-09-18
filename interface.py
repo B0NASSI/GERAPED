@@ -409,8 +409,7 @@ class GrupoSubsidiario:
         ttk.Label(self.frame, text="Benefícios desta tese subsidiária:").pack(anchor='w', pady=(10, 4))
         ttk.Label(
             self.frame,
-            text="Se todos os benefícios forem subsidiários da mesma tese, não informe os números de benefício. "
-                 "Com mais de um benefício, o número de cada um é obrigatório.",
+            text="Se todos os benefícios forem subsidiários da mesma tese, não adicione benefícios.",
             bootstyle='secondary', font=('Segoe UI', 8), wraplength=560, justify='left',
         ).pack(anchor='w', pady=(0, 6))
         self.frame_beneficios = ttk.Frame(self.frame)
@@ -422,7 +421,10 @@ class GrupoSubsidiario:
         ttk.Button(rodape, text="+ Adicionar benefício", command=self.adicionar_beneficio, bootstyle='primary-outline').pack(side='left')
         ttk.Button(rodape, text="Remover tese subsidiária", command=self._remover, bootstyle='danger-outline').pack(side='right')
 
-        self.adicionar_beneficio()
+        # Abre sem nenhum benefício adicionado (ver validar_beneficios_subsidiaria): o
+        # usuário só adiciona uma linha se quiser especificar benefícios individuais - caso
+        # contrário, entende-se que a tese subsidiária vale para todos os benefícios do
+        # pedido principal.
 
     def _atualizar_parametro(self):
         self.combo_parametro = _reconstruir_combo_parametro(self.frame_parametro, self.combo_tese)

@@ -84,8 +84,13 @@ class TestHerancaBeneficioSubsidiario:
 
 
 class TestValidarBeneficiosSubsidiaria:
-    def test_um_so_beneficio_sem_numero_e_permitido(self):
-        validar_beneficios_subsidiaria([('B91', None)], quantidade_principal=3)
+    def test_nenhum_beneficio_e_permitido(self):
+        # caminho normal para "todos os benefícios desta tese subsidiária"
+        validar_beneficios_subsidiaria([], quantidade_principal=3)
+
+    def test_um_so_beneficio_sem_numero_e_bloqueado(self):
+        with pytest.raises(ValueError, match='número'):
+            validar_beneficios_subsidiaria([('B91', None)], quantidade_principal=3)
 
     def test_mais_de_um_beneficio_sem_numero_e_bloqueado(self):
         # exatamente o caso relatado: 7 linhas de B91 sem número, virando "B91, B91, ..."
