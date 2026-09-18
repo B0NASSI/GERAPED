@@ -1071,20 +1071,43 @@ class Janela:
         except Exception:
             return None
 
+    def _listar_historico_notas(self):
+        """Todas as notas de atualização disponíveis (bundladas junto do app), da mais
+        recente para a mais antiga - não só a da versão instalada."""
+        pasta = self._res('NOTAS DE ATUALIZAÇÃO')
+        try:
+            nomes = [n for n in os.listdir(pasta) if n.lower().endswith('.txt')]
+        except Exception:
+            return []
+
+        def chave_versao(nome):
+            partes = nome[:-4].split('.')
+            return tuple(int(''.join(c for c in p if c.isdigit()) or 0) for p in partes)
+
+        nomes.sort(key=chave_versao, reverse=True)
+        historico = []
+        for nome in nomes:
+            versao = nome[:-4]
+            texto = self._ler_notas_atualizacao(versao)
+            if texto:
+                historico.append((versao, texto))
+        return historico
+
     def _mostrar_notas_atualizacao(self):
-        texto = self._ler_notas_atualizacao(self._versao)
-        if texto is None:
-            texto = f'Nenhuma nota de atualização encontrada para a versão {self._versao}.'
+        historico = self._listar_historico_notas()
+        if not historico:
+            historico = [(self._versao, f'Nenhuma nota de atualização encontrada para a versão {self._versao}.')]
 
         janela = tk.Toplevel(self.root)
         janela.title('Notas de atualização')
-        _centralizar_janela(janela, self.root, 560, 480)
+        _centralizar_janela(janela, self.root, 560, 520)
         janela.transient(self.root)
         janela.grab_set()
         janela.resizable(True, True)
 
         ttk.Label(
-            janela, text=f'Versão instalada: {self._versao}', font=('Segoe UI', 10, 'bold'),
+            janela, text=f'Histórico de versões (instalada: {self._versao})',
+            font=('Segoe UI', 10, 'bold'),
         ).pack(anchor='w', padx=16, pady=(14, 6))
 
         frame_texto = ttk.Frame(janela, padding=(16, 0, 16, 0))
@@ -1093,6 +1116,7 @@ class Janela:
         sb = ttk.Scrollbar(frame_texto)
         sb.pack(side='right', fill='y')
         fonte_notas = tkfont.Font(family='Segoe UI', size=10)
+        fonte_titulo_versao = tkfont.Font(family='Segoe UI', size=10, weight='bold')
         # wrap='none': a quebra de linha é feita por nós (_justificar_paragrafo), com
         # espaços extras inseridos pra esticar cada linha - o wrap automático do Tk não
         # sabe nada sobre esses espaços e cortaria errado.
@@ -1102,6 +1126,7 @@ class Janela:
         )
         sb.configure(command=txt.yview)
         txt.pack(side='left', fill='both', expand=True)
+        txt.tag_configure('titulo_versao', font=fonte_titulo_versao)
 
         def renderizar(_event=None):
             # Descontando o padx interno (10 de cada lado) e uma margem de segurança
@@ -1111,15 +1136,22 @@ class Janela:
             largura_px = int((txt.winfo_width() - 20) * 0.90)
             if largura_px <= 10:
                 return
-            blocos = _preparar_paragrafos_notas(texto)
             txt.config(state='normal')
             txt.delete('1.0', 'end')
-            for i, bloco in enumerate(blocos):
-                for prefixo, paragrafo in bloco:
-                    linhas = _justificar_paragrafo(prefixo, paragrafo, fonte_notas, largura_px)
-                    txt.insert('end', '\n'.join(linhas) + '\n')
-                if i < len(blocos) - 1:
+            for i, (_versao, texto) in enumerate(historico):
+                if i > 0:
                     txt.insert('end', '\n')
+                # A primeira linha de cada nota ("GERAPED X.Y") já identifica a versão -
+                # só destaca em negrito, sem duplicar como um título separado.
+                primeira_linha, _, resto = texto.partition('\n')
+                txt.insert('end', primeira_linha + '\n', 'titulo_versao')
+                blocos = _preparar_paragrafos_notas(resto)
+                for j, bloco in enumerate(blocos):
+                    for prefixo, paragrafo in bloco:
+                        linhas = _justificar_paragrafo(prefixo, paragrafo, fonte_notas, largura_px)
+                        txt.insert('end', '\n'.join(linhas) + '\n')
+                    if j < len(blocos) - 1:
+                        txt.insert('end', '\n')
             txt.config(state='disabled')
 
         txt.bind('<Configure>', renderizar)
