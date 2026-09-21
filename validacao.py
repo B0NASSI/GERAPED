@@ -29,10 +29,16 @@ def limitar_especies(especies_marcadas, quantidade):
 
 
 def validar_especies(tese_key, especies, quantidade):
-    if TESES[tese_key].get('ignora_especie'):
+    tese = TESES[tese_key]
+    if tese.get('ignora_especie'):
         return
     if not especies:
         raise ValueError('Selecione ao menos uma espécie do benefício.')
+    permitidas = tese.get('especies_permitidas')
+    if permitidas is not None:
+        invalidas = [e for e in especies if e not in permitidas]
+        if invalidas:
+            raise ValueError(f'Para esta tese, selecione apenas entre: {", ".join(permitidas)}.')
     if limite_especies_excedido(quantidade, especies):
         raise ValueError(f'Com quantidade {quantidade}, selecione no máximo {quantidade} espécie(s) de benefício.')
 
@@ -49,6 +55,12 @@ def validar_itens_duplicados(itens_peticao):
                 'Cada pedido principal deve ter um item da petição inicial diferente.'
             )
         itens_vistos[item] = i
+
+
+def tese_permite_subsidiario(tese_key):
+    """Algumas teses não admitem benefício subsidiário (pedido do escritório - ex:
+    Rotatividade, CAT não vinculada: o texto delas não comporta essa estrutura)."""
+    return bool(TESES[tese_key].get('permite_subsidiario', True))
 
 
 def especie_unica_travada(especies_marcadas, especies_validas_subsidiaria):

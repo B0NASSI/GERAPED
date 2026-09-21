@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 app_datas = [
     ('icone.ico', '.'),
@@ -10,6 +10,15 @@ app_datas = [
 ] + collect_data_files('ttkbootstrap')
 app_binaries = []
 app_hiddenimports = []
+# 'requests' entra aqui porque main.py importa launcher.py em runtime (dentro de
+# _avisar_se_desatualizado, pra checar atualização mesmo quando o GERAPED.exe é aberto
+# direto, sem passar pelo launcher) - precisa do collect_all completo, não só do hidden
+# import, senão a checagem quebra em silêncio (sem crash, só nunca encontra atualização -
+# já aconteceu no REQUERID). Por isso 'excludes' do app.py continua vazio: 'email'/'http'
+# NÃO podem ser excluídos, requests depende deles por baixo dos panos (via urllib3).
+for pacote in ('requests',):
+    tmp_ret = collect_all(pacote)
+    app_datas += tmp_ret[0]; app_binaries += tmp_ret[1]; app_hiddenimports += tmp_ret[2]
 
 a_app = Analysis(
     ['main.py'],

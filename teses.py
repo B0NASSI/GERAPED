@@ -52,6 +52,16 @@ TESES = {
         'motivo_singular': 'por se tratar de benefício de natureza previdenciária',
         'motivo_plural': 'por se tratar de benefícios de natureza previdenciária',
     },
+    'convertido': {
+        'nome': 'CONVERTIDO',
+        # Mesmo texto de BENEFÍCIO PREVIDENCIÁRIO (natureza_previdenciaria) - são teses
+        # distintas só na petição inicial, mas o pedido de exclusão em si é idêntico.
+        'motivo_singular': 'por se tratar de benefício de natureza previdenciária',
+        'motivo_plural': 'por se tratar de benefícios de natureza previdenciária',
+        # só faz sentido para benefícios previdenciários (não acidentários) - restringe as
+        # espécies selecionáveis na UI (ver _atualizar_estado_especies em interface.py)
+        'especies_permitidas': ['B31', 'B36'],
+    },
     'concomitancia_outro_beneficio': {
         'nome': 'CONCOMITANTE',
         # {outro_beneficio} é preenchido a partir do seletor extra (ver PARAMETROS_TESE) -
@@ -66,6 +76,37 @@ TESES = {
         'motivo_singular': 'decorrente de acidente anterior a abril de 2007',
         # plural inferido (template só mostra o singular) - ajustar se aparecer um caso real
         'motivo_plural': 'decorrentes de acidentes anteriores a abril de 2007',
+    },
+    'ntp_duplicado': {
+        'nome': 'NTP DUPLICADO',
+        'motivo_singular': 'por se tratar de evento acidentário considerado em duplicidade',
+        'motivo_plural': 'por se tratar de eventos acidentários considerados em duplicidade',
+        # aqui o que é excluído não é "benefício de espécie X", e sim o NTP em si
+        'substantivo_singular': 'Nexo Técnico Previdenciário (NTP) sem Comunicação de Acidente de Trabalho (CAT) vinculada ao benefício',
+        'substantivo_plural': 'Nexos Técnicos Previdenciário (NTP) sem Comunicação de Acidente de Trabalho (CAT) vinculadas aos benefícios',
+        # o texto não menciona espécie de benefício (é sempre "NTP") - campo desabilitado na UI
+        'ignora_especie': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
+    },
+    'cat_duplicada': {
+        'nome': 'CAT DUPLICADA',
+        'motivo_singular': 'por se tratar de comunicação acidentária em duplicidade para o mesmo acidente',
+        'motivo_plural': 'por se tratar de comunicações acidentárias em duplicidade para os mesmos acidentes',
+        # aqui o que é excluído não é "benefício de espécie X", e sim a CAT em si
+        'substantivo_singular': 'Comunicação de Acidente de Trabalho (CAT)',
+        'substantivo_plural': 'Comunicações de Acidente de Trabalho (CATs)',
+        'ignora_especie': True,
+        # "Comunicação" é feminino ("uma", "abaixo arrolada(s)") - ver 'genero' em
+        # montar_clausula_principal (gerador_pedido.py)
+        'genero': 'feminino',
+        # texto oficial não usa o artigo: "Determinar exclusão de..." (não "Determinar A
+        # exclusão de...")
+        'omitir_artigo_exclusao': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
     'sobreposicao_concomitancia_beneficios': {
         'nome': 'SOBREPOSIÇÃO',
@@ -96,6 +137,9 @@ TESES = {
         'base_calculo': 'da base de cálculo do índice do FAP',
         # o texto não menciona espécie de benefício (é sempre "NTP") - campo desabilitado na UI
         'ignora_especie': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
     'erro_implantacao': {
         'nome': 'ERRO DE IMPLANTAÇÃO',
@@ -120,6 +164,9 @@ TESES = {
         ),
         # texto fixo não menciona benefícios por espécie - campo desabilitado na UI
         'ignora_especie': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
     'erro_massa_salarial': {
         'nome': 'ERRO DE MASSA SALARIAL',
@@ -137,6 +184,9 @@ TESES = {
         # trata de massa salarial do estabelecimento, não de benefícios por espécie/quantidade
         'ignora_especie': True,
         'ignora_quantidade': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
     'erro_vinculos': {
         'nome': 'ERRO DE VÍNCULOS',
@@ -154,6 +204,9 @@ TESES = {
         # trata de número médio de vínculos do estabelecimento, não de benefícios por espécie/quantidade
         'ignora_especie': True,
         'ignora_quantidade': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
     'custo_cessado': {
         'nome': 'CUSTO CESSADO',

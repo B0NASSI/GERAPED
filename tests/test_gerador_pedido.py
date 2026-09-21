@@ -159,6 +159,46 @@ class TestCustoCessado:
         assert 'esta correspondente ao dia imediatamente anterior ao óbito' in t
 
 
+class TestNtpDuplicado:
+    def test_singular(self):
+        t = texto(pedido_base(tese_key='ntp_duplicado', especies=[], item_peticao='16'))
+        assert t == (
+            'Determinar a exclusão de 1 (um) Nexo Técnico Previdenciário (NTP) sem '
+            'Comunicação de Acidente de Trabalho (CAT) vinculada ao benefício, abaixo '
+            'arrolado, da base de cálculo do índice do FAP, por se tratar de evento '
+            'acidentário considerado em duplicidade – item 16 da petição inicial.'
+        )
+
+    def test_plural(self):
+        t = texto(pedido_base(tese_key='ntp_duplicado', quantidade=2, especies=[], item_peticao='16'))
+        assert t == (
+            'Determinar a exclusão de 2 (dois) Nexos Técnicos Previdenciário (NTP) sem '
+            'Comunicação de Acidente de Trabalho (CAT) vinculadas aos benefícios, abaixo '
+            'arrolados, da base de cálculo dos índices do FAP, por se tratar de eventos '
+            'acidentários considerados em duplicidade – item 16 da petição inicial.'
+        )
+
+
+class TestCatDuplicada:
+    def test_singular_no_feminino_e_sem_artigo(self):
+        t = texto(pedido_base(tese_key='cat_duplicada', especies=[], item_peticao='11'))
+        assert t == (
+            'Determinar exclusão de 1 (uma) Comunicação de Acidente de Trabalho (CAT), '
+            'abaixo arrolada, da base de cálculo do índice do FAP, por se tratar de '
+            'comunicação acidentária em duplicidade para o mesmo acidente – item 11 da '
+            'petição inicial.'
+        )
+
+    def test_plural_no_feminino_e_sem_artigo(self):
+        t = texto(pedido_base(tese_key='cat_duplicada', quantidade=3, especies=[], item_peticao='11'))
+        assert t == (
+            'Determinar exclusão de 3 (três) Comunicações de Acidente de Trabalho (CATs), '
+            'abaixo arroladas, da base de cálculo dos índices do FAP, por se tratar de '
+            'comunicações acidentárias em duplicidade para os mesmos acidentes – item 11 '
+            'da petição inicial.'
+        )
+
+
 class TestTeseSubsidiaria:
     def test_beneficio_unico_com_numero_fica_no_singular(self):
         pedido = pedido_base(grupos_subsidiarios=[

@@ -4,12 +4,14 @@
 4. Ausência de nexo causal e concausalidade afastados por decisão judicial= NEXO AFASTADO
 5. Acidente sem relação com a empresa Autora= OUTRA EMPRESA
 6. Benefício de natureza previdenciária= BENEFÍCIO PREVIDENCIÁRIO
+6.1. Convertido (mesmo texto do item 6, tese separada só na petição inicial)= CONVERTIDO
 7. Concomitância com outro benefício (com escolha de: auxílio por incapacidade temporária / aposentadoria / auxílio-acidente)= CONCOMITANTE
 8. Acidente anterior a abril de 2007= PRÉ-FAP
 9. Sobreposição e concomitância de benefícios= SOBREPOSIÇÃO
+9.1. NTP sem CAT vinculada, considerado em duplicidade= NTP DUPLICADO
+9.2. CAT em duplicidade para o mesmo acidente= CAT DUPLICADA
 
 Novas a implementar:
-10. Convertido  (TEM ALGUNS TIPOS - em B31, B36 ou B32 -, IGUAL O CONCOMITANTE)= CONVERTIDO
 11. Rotatividade= ROTATIVIDADE
 12. Erro na massa salarial= ERRO DE MASSA SALARIAL
 13. Erro no número médio de vínculos= ERRO DE VÍNCULOS

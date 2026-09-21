@@ -1,0 +1,6 @@
+GERAPED 1.2.2
+
+- Novas teses: CONVERTIDO, NTP DUPLICADO e CAT DUPLICADA.
+- Aviso quando o app está desatualizado, mesmo abrindo direto o GERAPED.exe sem passar pelo atalho/launcher.
+- Janelas de Ordem, Histórico e Notas de atualização agora abrem no mesmo monitor da janela principal.
+- "Notas de atualização" vira um link discreto no rodapé; botão "Opções" renomeado para "Ordem".

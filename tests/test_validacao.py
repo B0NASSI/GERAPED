@@ -3,8 +3,21 @@ import pytest
 from validacao import (
     validar_quantidade, validar_especies, limite_especies_excedido, limitar_especies,
     validar_itens_duplicados, especie_unica_travada, beneficio_subsidiario_pode_herdar_do_principal,
-    validar_beneficios_subsidiaria,
+    validar_beneficios_subsidiaria, tese_permite_subsidiario,
 )
+
+
+class TestTesePermiteSubsidiario:
+    @pytest.mark.parametrize('tese_key', [
+        'cat_nao_vinculada', 'ntp_duplicado', 'cat_duplicada',
+        'erro_massa_salarial', 'erro_vinculos', 'rotatividade',
+    ])
+    def test_teses_sem_subsidiario(self, tese_key):
+        assert tese_permite_subsidiario(tese_key) is False
+
+    @pytest.mark.parametrize('tese_key', ['acidente_trajeto', 'natureza_previdenciaria', 'custo_cessado'])
+    def test_demais_teses_permitem_subsidiario(self, tese_key):
+        assert tese_permite_subsidiario(tese_key) is True
 
 
 class TestValidarQuantidade:
@@ -49,6 +62,15 @@ class TestValidarEspecies:
     def test_tese_que_ignora_especie_nao_exige_nada(self):
         # rotatividade tem 'ignora_especie': True em teses.py
         validar_especies('rotatividade', [], quantidade=1)
+
+    def test_convertido_aceita_b31_e_b36(self):
+        # convertido tem 'especies_permitidas': ['B31', 'B36'] em teses.py
+        validar_especies('convertido', ['B31'], quantidade=1)
+        validar_especies('convertido', ['B31', 'B36'], quantidade=2)
+
+    def test_convertido_bloqueia_especie_fora_da_lista_permitida(self):
+        with pytest.raises(ValueError, match='B31, B36'):
+            validar_especies('convertido', ['B91'], quantidade=1)
 
 
 class TestItensDuplicados:

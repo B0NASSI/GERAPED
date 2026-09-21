@@ -7,6 +7,35 @@ import sys
 
 from teses import TESES
 
+# Ordem padrão curada (não alfabética) usada quando o usuário nunca salvou uma
+# preferência própria em "Opções" - pedido do escritório. Teses que existirem em TESES mas
+# não estiverem aqui (ex: adicionadas depois e esquecidas desta lista) vão para o final, em
+# ordem alfabética, via ordenar_chaves_teses - nunca somem da tela.
+ORDEM_PADRAO = [
+    'contestacao_administrativa',
+    'prescricao_quinquenal',
+    'cat_nao_vinculada',
+    'acidente_sem_relacao_empresa',
+    'acidente_trajeto',
+    'convertido',
+    'natureza_previdenciaria',
+    'restabelecimento_beneficio_anterior',
+    'beneficio_cancelado_revogado',
+    'erro_implantacao',
+    'acidente_outro_estabelecimento',
+    'concomitancia_outro_beneficio',
+    'dib_igual_dcb',
+    'ausencia_nexo_causal_concausalidade',
+    'acidente_anterior_2007',
+    'custo_cessado',
+    'sobreposicao_concomitancia_beneficios',
+    'ntp_duplicado',
+    'cat_duplicada',
+    'erro_vinculos',
+    'erro_massa_salarial',
+    'rotatividade',
+]
+
 
 def _caminho_preferencias():
     base = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
@@ -38,20 +67,38 @@ def salvar_ordem_teses(ordem_chaves):
         pass
 
 
-def ordenar_chaves_teses(chaves=None):
-    """Chaves de tese (restritas a 'chaves', se informado) na ordem preferida do usuário -
-    teses nunca vistas na preferência salva (ex: adicionadas depois) vão ao final, em ordem
-    alfabética, para não sumirem da lista."""
-    universo = list(chaves) if chaves is not None else list(TESES.keys())
-    ordem_salva = ler_ordem_teses()
-    if not ordem_salva:
-        return sorted(universo, key=lambda c: TESES[c]['nome'])
-
+def _completar_e_filtrar(base, universo):
+    """Filtra 'base' (uma ordem de chaves, possivelmente incompleta) para o universo dado,
+    completando com ORDEM_PADRAO e por fim ordem alfabética para o que faltar - assim
+    nenhuma chave do universo some da lista."""
     no_universo = set(universo)
-    ordenadas = [c for c in ordem_salva if c in no_universo]
-    vistas = set(ordenadas)
-    restantes = sorted((c for c in universo if c not in vistas), key=lambda c: TESES[c]['nome'])
+    vistas = set(base)
+    completa = list(base)
+    for chave in ORDEM_PADRAO:
+        if chave not in vistas:
+            completa.append(chave)
+            vistas.add(chave)
+
+    ordenadas = [c for c in completa if c in no_universo]
+    vistas_no_universo = set(ordenadas)
+    restantes = sorted((c for c in universo if c not in vistas_no_universo), key=lambda c: TESES[c]['nome'])
     return ordenadas + restantes
+
+
+def ordenar_chaves_teses(chaves=None):
+    """Chaves de tese (restritas a 'chaves', se informado), na ordem preferida do usuário
+    (se ele já salvou uma em "Opções"), completada pela ORDEM_PADRAO curada para o que não
+    estiver na preferência salva - e só cai para ordem alfabética o que nem isso tiver (ex:
+    tese nova, ainda não incluída em ORDEM_PADRAO), pra nunca sumir da lista."""
+    universo = list(chaves) if chaves is not None else list(TESES.keys())
+    return _completar_e_filtrar(ler_ordem_teses() or [], universo)
+
+
+def ordem_padrao_chaves(chaves=None):
+    """Como ordenar_chaves_teses, mas ignorando qualquer preferência salva - usada pelo
+    botão "Restaurar padrão" em Opções, pra descartar a customização do usuário de propósito."""
+    universo = list(chaves) if chaves is not None else list(TESES.keys())
+    return _completar_e_filtrar([], universo)
 
 
 def ordenar_nomes_teses(chaves=None):

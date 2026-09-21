@@ -110,16 +110,30 @@ def _descricao_item(tese, especies, singular):
 def montar_clausula_principal(paragrafo, quantidade, especies, tese_key, item_peticao, parametro_valor=None):
     tese = TESES[tese_key]
     singular = quantidade == 1
+    # Teses cujo substantivo excluído é gramaticalmente feminino (ex: Comunicação de
+    # Acidente de Trabalho) precisam de "uma"/"duzentas"/"abaixo arrolada(s)" em vez do
+    # masculino padrão - ver 'genero' em teses.py.
+    feminino = tese.get('genero') == 'feminino'
 
-    _add_run(paragrafo, 'Determinar a ')
+    _add_run(paragrafo, 'Determinar ')
+    # Algumas teses (ex: CAT DUPLICADA) omitem o artigo: "Determinar exclusão de..." em vez
+    # de "Determinar a exclusão de...", conforme o texto oficial - ver 'omitir_artigo_exclusao'.
+    if not tese.get('omitir_artigo_exclusao'):
+        _add_run(paragrafo, 'a ')
     _add_run(paragrafo, 'exclusão', bold=True)
     _add_run(paragrafo, ' de ')
 
-    contagem = '1 (um)' if singular else numero_e_extenso(quantidade)
+    if singular:
+        contagem = '1 (uma)' if feminino else '1 (um)'
+    else:
+        contagem = numero_e_extenso(quantidade, feminino=feminino)
     _add_run(paragrafo, contagem, bold=True)
     _add_run(paragrafo, ' ')
     _add_run(paragrafo, _descricao_item(tese, especies, singular), bold=True)
-    arrolado = 'abaixo arrolado' if singular else 'abaixo arrolados'
+    if feminino:
+        arrolado = 'abaixo arrolada' if singular else 'abaixo arroladas'
+    else:
+        arrolado = 'abaixo arrolado' if singular else 'abaixo arrolados'
     # 'base_calculo' sobrescreve a frase padrão para teses cujo modelo oficial não segue a
     # regra "índice do FAP" (singular) / "índices do FAP" (plural) - ex: DIB=DCB usa
     # "da base de cálculo do FAP" sem menção a índice, e CAT não vinculada usa "índice" sempre

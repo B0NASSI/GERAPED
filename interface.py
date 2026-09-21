@@ -15,9 +15,9 @@ from gerador_pedido import gerar_documento, COR_ITEM_PETICAO
 from validacao import (
     validar_quantidade, validar_especies, limite_especies_excedido, limitar_especies,
     validar_itens_duplicados, especie_unica_travada, beneficio_subsidiario_pode_herdar_do_principal,
-    validar_beneficios_subsidiaria,
+    validar_beneficios_subsidiaria, tese_permite_subsidiario,
 )
-from preferencias import ordenar_chaves_teses, ordenar_nomes_teses, salvar_ordem_teses
+from preferencias import ordenar_chaves_teses, ordenar_nomes_teses, salvar_ordem_teses, ordem_padrao_chaves
 
 ESPECIES = list(TIPO_BENEFICIO_POR_ESPECIE.keys())
 ESPECIES_SUBSIDIARIA = ['B91', 'B92', 'B93', 'B94']
@@ -57,6 +57,39 @@ def _caminho_historico():
     return os.path.join(base, 'historico.json')
 
 
+def _retangulo_monitor_atual(root):
+    """(esquerda, topo, direita, baixo) do monitor do Windows que contém root - usado no
+    lugar de winfo_screenwidth()/height(), que no Tk sempre reportam as dimensões do
+    monitor PRINCIPAL, mesmo com o app aberto num monitor secundário. Sem isso, janelas
+    secundárias (Opções, Histórico, Notas de atualização...) eram empurradas de volta pro
+    monitor principal em setups com múltiplos monitores. None se não for Windows ou algo
+    der errado (nesse caso quem chama cai de volta em winfo_screenwidth/height)."""
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+
+        class RECT(ctypes.Structure):
+            _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
+                        ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [('cbSize', ctypes.c_ulong), ('rcMonitor', RECT),
+                        ('rcWork', RECT), ('dwFlags', ctypes.c_ulong)]
+
+        MONITOR_DEFAULTTONEAREST = 2
+        hwnd = root.winfo_id()
+        monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if not ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return None
+        r = info.rcWork
+        return r.left, r.top, r.right, r.bottom
+    except Exception:
+        return None
+
+
 def _centralizar_janela(janela, root, largura, altura):
     janela.update_idletasks()
     x = root.winfo_x() + (root.winfo_width() - largura) // 2
@@ -66,8 +99,14 @@ def _centralizar_janela(janela, root, largura, altura):
     # A barra de título fica acima da coordenada y informada - por isso a margem
     # no topo, senão ela é cortada pelo limite da tela.
     margem_topo = 40
-    x = max(0, min(x, janela.winfo_screenwidth() - largura))
-    y = max(margem_topo, min(y, janela.winfo_screenheight() - altura))
+    retangulo = _retangulo_monitor_atual(root)
+    if retangulo:
+        esquerda, topo, direita, baixo = retangulo
+        x = max(esquerda, min(x, direita - largura))
+        y = max(topo + margem_topo, min(y, baixo - altura))
+    else:
+        x = max(0, min(x, janela.winfo_screenwidth() - largura))
+        y = max(margem_topo, min(y, janela.winfo_screenheight() - altura))
     janela.geometry(f'{largura}x{altura}+{x}+{y}')
 
 
@@ -342,7 +381,7 @@ class LinhaBeneficio:
             radio.pack(side='left', padx=(0, 10))
             self.radios_especie[especie] = radio
 
-        ttk.Label(self.frame, text="Nº do benefício (opcional):").pack(side='left', padx=(8, 4))
+        ttk.Label(self.frame, text="Nº do benefício:").pack(side='left', padx=(8, 4))
         self.entry_numero = ttk.Entry(self.frame, width=18)
         self.entry_numero.pack(side='left', padx=(0, 8))
 
@@ -524,6 +563,7 @@ class BlocoPedido:
             '<<ComboboxSelected>>',
             lambda e: [
                 self._atualizar_parametro(), self._atualizar_estado_especies(), self._atualizar_estado_quantidade(),
+                self._atualizar_estado_subsidiario(),
             ],
             add='+',
         )
@@ -562,10 +602,11 @@ class BlocoPedido:
         self.grupos_subsidiarios = []
 
         self.var_subsidiario = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        self.check_subsidiario = ttk.Checkbutton(
             self.frame, text="Possui pedido subsidiário?", variable=self.var_subsidiario,
             command=self._alternar_subsidiario,
-        ).grid(row=5, column=0, columnspan=2, sticky='w', pady=(14, 0))
+        )
+        self.check_subsidiario.grid(row=5, column=0, columnspan=2, sticky='w', pady=(14, 0))
 
         self.frame_subsidiario = ttk.Frame(self.frame)
         self.frame_grupos = ttk.Frame(self.frame_subsidiario)
@@ -574,6 +615,7 @@ class BlocoPedido:
             self.frame_subsidiario, text="+ Adicionar tese subsidiária",
             command=self.adicionar_grupo_subsidiario, bootstyle='primary-outline',
         ).pack(anchor='w', pady=(6, 0))
+        self._atualizar_estado_subsidiario()
 
         ttk.Separator(self.frame).grid(row=7, column=0, columnspan=2, sticky='ew', pady=(14, 10))
         ttk.Button(self.frame, text="Remover este pedido", command=self._remover, bootstyle='danger-outline').grid(
@@ -595,12 +637,21 @@ class BlocoPedido:
 
     def _atualizar_estado_especies(self):
         """Desabilita (cinza, só visual) a escolha de espécie quando a tese selecionada não
-        depende da espécie do benefício (ex: Rotatividade, CAT não vinculada)."""
+        depende da espécie do benefício (ex: Rotatividade, CAT não vinculada), ou restringe
+        às espécies permitidas por ela (ex: Convertido só aceita B31/B36) - desmarcando
+        qualquer espécie que tenha ficado marcada e não seja mais permitida."""
         tese = TESES.get(nome_para_chave(self.combo_tese.get()))
         ignora = bool(tese and tese.get('ignora_especie'))
-        estado = 'disabled' if ignora else 'normal'
-        for check in self.checks_especies.values():
-            check.configure(state=estado)
+        permitidas = tese.get('especies_permitidas') if tese else None
+        for especie, check in self.checks_especies.items():
+            if ignora:
+                check.configure(state='disabled')
+                continue
+            if permitidas is not None and especie not in permitidas:
+                check.configure(state='disabled')
+                self.vars_especies[especie].set(False)
+            else:
+                check.configure(state='normal')
 
     def _atualizar_estado_quantidade(self):
         """Desabilita (cinza, só visual) a quantidade quando a tese selecionada não depende
@@ -608,6 +659,23 @@ class BlocoPedido:
         tese = TESES.get(nome_para_chave(self.combo_tese.get()))
         ignora = bool(tese and tese.get('ignora_quantidade'))
         self.entry_quantidade.configure(state='disabled' if ignora else 'normal')
+
+    def _atualizar_estado_subsidiario(self):
+        """Desabilita (e desmarca) o checkbox "Possui pedido subsidiário?" para teses que
+        não admitem benefício subsidiário (ex: Rotatividade, CAT não vinculada - pedido do
+        escritório), removendo qualquer tese subsidiária já adicionada."""
+        tese_key = nome_para_chave(self.combo_tese.get())
+        permite = tese_key is None or tese_permite_subsidiario(tese_key)
+        if permite:
+            self.check_subsidiario.configure(state='normal')
+            return
+        if self.var_subsidiario.get():
+            self.var_subsidiario.set(False)
+            self.frame_subsidiario.grid_forget()
+        for grupo in list(self.grupos_subsidiarios):
+            grupo.frame.destroy()
+        self.grupos_subsidiarios = []
+        self.check_subsidiario.configure(state='disabled')
 
     def _quantidade_atual(self):
         texto = self.entry_quantidade.get().strip()
@@ -719,6 +787,8 @@ class BlocoPedido:
         }
 
         if self.var_subsidiario.get():
+            if not tese_permite_subsidiario(tese_key):
+                raise ValueError('esta tese não admite benefício subsidiário.')
             grupos = []
             for i, grupo in enumerate(self.grupos_subsidiarios, start=1):
                 try:
@@ -767,7 +837,18 @@ class Janela:
             w = int(img.width * h / img.height)
             self._logo = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
             tk.Label(rodape, image=self._logo, borderwidth=0, background=tema.COR_FUNDO).pack(side='left')
-        ttk.Label(rodape, text=f'versão {self._versao}', bootstyle='secondary', font=('Segoe UI', 8)).pack(side='right')
+        ttk.Label(rodape, text=f'Versão {self._versao}', bootstyle='secondary', font=('Segoe UI', 8)).pack(side='right')
+        ttk.Label(rodape, text=' - ', bootstyle='secondary', font=('Segoe UI', 8)).pack(side='right')
+        # "Notas de atualização" fica discreta aqui, como um link com ícone junto da versão
+        # (agrupados com um "-" entre os dois, pra não parecer solto) - não é algo que se
+        # consulte com frequência, então não precisa de um botão próprio lá em cima (a
+        # barra de topo fica só com Opções/Histórico, que são ações).
+        link_notas = ttk.Label(
+            rodape, text='ⓘ Notas de atualização', bootstyle='secondary', font=('Segoe UI', 8),
+            cursor='hand2',
+        )
+        link_notas.pack(side='right')
+        link_notas.bind('<Button-1>', lambda e: self._mostrar_notas_atualizacao())
 
         # ── Barra de botões (side=bottom) ────────────────────────────────────
         ttk.Separator(root).pack(fill='x', side='bottom')
@@ -786,10 +867,7 @@ class Janela:
         barra_topo = ttk.Frame(container)
         barra_topo.pack(fill='x', pady=(0, 10))
         ttk.Button(barra_topo, text="Histórico", command=self._mostrar_historico, bootstyle='primary-outline').pack(side='right')
-        ttk.Button(barra_topo, text="Opções", command=self._mostrar_opcoes, bootstyle='primary-outline').pack(side='right', padx=(0, 8))
-        ttk.Button(
-            barra_topo, text="Notas de atualização", command=self._mostrar_notas_atualizacao, bootstyle='primary-outline',
-        ).pack(side='right', padx=(0, 8))
+        ttk.Button(barra_topo, text="Ordem", command=self._mostrar_opcoes, bootstyle='primary-outline').pack(side='right', padx=(0, 10))
 
         self.canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0, background=tema.COR_FUNDO)
 
@@ -982,7 +1060,7 @@ class Janela:
         chaves_estado = ordenar_chaves_teses()
 
         janela = tk.Toplevel(self.root)
-        janela.title('Opções — Ordem das teses')
+        janela.title('Ordem das teses')
         _centralizar_janela(janela, self.root, 460, 520)
         janela.transient(self.root)
         janela.grab_set()
@@ -1024,7 +1102,7 @@ class Janela:
             lista.selection_set(j)
 
         def restaurar_padrao():
-            chaves_estado[:] = sorted(TESES.keys(), key=lambda c: TESES[c]['nome'])
+            chaves_estado[:] = ordem_padrao_chaves()
             lista.delete(0, 'end')
             for chave in chaves_estado:
                 lista.insert('end', TESES[chave]['nome'])
@@ -1046,7 +1124,7 @@ class Janela:
         ttk.Separator(janela).pack(fill='x', pady=(12, 0))
         botoes = ttk.Frame(janela, padding=(16, 10))
         botoes.pack(fill='x')
-        ttk.Button(botoes, text='Restaurar padrão (A-Z)', command=restaurar_padrao, bootstyle='secondary-outline').pack(
+        ttk.Button(botoes, text='Restaurar padrão', command=restaurar_padrao, bootstyle='secondary-outline').pack(
             side='left',
         )
         ttk.Button(botoes, text='Cancelar', command=janela.destroy, bootstyle='secondary-outline').pack(
@@ -1110,6 +1188,16 @@ class Janela:
             font=('Segoe UI', 10, 'bold'),
         ).pack(anchor='w', padx=16, pady=(14, 6))
 
+        # Empacota a barra de botões (e o separador acima dela) ANTES da área de texto -
+        # assim o gerenciador de geometria reserva esse espaço primeiro, e a área de texto
+        # (abaixo, com expand=True) nunca cresce por cima dela, não importa quanto texto
+        # tenha (foi o que causava o botão "Fechar" ficando espremido/sobreposto pelo
+        # texto quando o histórico de notas cresceu).
+        botoes = ttk.Frame(janela, padding=(16, 10))
+        botoes.pack(fill='x', side='bottom')
+        ttk.Button(botoes, text='Fechar', command=janela.destroy, bootstyle='secondary-outline').pack(side='right')
+        ttk.Separator(janela).pack(fill='x', side='bottom', pady=(8, 0))
+
         frame_texto = ttk.Frame(janela, padding=(16, 0, 16, 0))
         frame_texto.pack(fill='both', expand=True)
 
@@ -1155,11 +1243,6 @@ class Janela:
             txt.config(state='disabled')
 
         txt.bind('<Configure>', renderizar)
-
-        ttk.Separator(janela).pack(fill='x', pady=(8, 0))
-        botoes = ttk.Frame(janela, padding=(16, 10))
-        botoes.pack(fill='x')
-        ttk.Button(botoes, text='Fechar', command=janela.destroy, bootstyle='secondary-outline').pack(side='right')
 
     def _mostrar_historico(self):
         historico = self._ler_historico()

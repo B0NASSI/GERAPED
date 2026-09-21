@@ -26,11 +26,38 @@ def test_ler_ordem_ignora_chaves_que_nao_existem_mais(tmp_path, monkeypatch):
     assert preferencias.ler_ordem_teses() == ['rotatividade']
 
 
-def test_ordenar_chaves_teses_sem_preferencia_usa_alfabetica(tmp_path, monkeypatch):
+def test_ordenar_chaves_teses_sem_preferencia_usa_ordem_padrao(tmp_path, monkeypatch):
     _isolar(tmp_path, monkeypatch)
-    chaves = ['rotatividade', 'acidente_trajeto']
-    resultado = preferencias.ordenar_chaves_teses(chaves)
-    assert resultado == sorted(chaves, key=lambda c: TESES[c]['nome'])
+    # 'acidente_trajeto' vem antes de 'rotatividade' na ORDEM_PADRAO, embora o inverso
+    # seja verdade em ordem alfabética (ROTATIVIDADE < TRAJETO) - confirma que o padrão
+    # sem preferência salva usa a curadoria, não A-Z.
+    resultado = preferencias.ordenar_chaves_teses(['rotatividade', 'acidente_trajeto'])
+    assert resultado == ['acidente_trajeto', 'rotatividade']
+
+
+def test_convertido_vem_logo_apos_trajeto_na_ordem_padrao():
+    idx_trajeto = preferencias.ORDEM_PADRAO.index('acidente_trajeto')
+    idx_convertido = preferencias.ORDEM_PADRAO.index('convertido')
+    assert idx_convertido == idx_trajeto + 1
+
+
+def test_ntp_duplicado_e_cat_duplicada_vem_logo_apos_sobreposicao_na_ordem_padrao():
+    idx_sobreposicao = preferencias.ORDEM_PADRAO.index('sobreposicao_concomitancia_beneficios')
+    idx_ntp = preferencias.ORDEM_PADRAO.index('ntp_duplicado')
+    idx_cat = preferencias.ORDEM_PADRAO.index('cat_duplicada')
+    assert idx_ntp == idx_sobreposicao + 1
+    assert idx_cat == idx_ntp + 1
+
+
+def test_ordem_padrao_chaves_ignora_preferencia_salva(tmp_path, monkeypatch):
+    _isolar(tmp_path, monkeypatch)
+    preferencias.salvar_ordem_teses(['rotatividade', 'acidente_trajeto'])
+    resultado = preferencias.ordem_padrao_chaves(['rotatividade', 'acidente_trajeto'])
+    assert resultado == ['acidente_trajeto', 'rotatividade']
+
+
+def test_ordem_padrao_cobre_todas_as_teses_cadastradas():
+    assert set(preferencias.ORDEM_PADRAO) == set(TESES.keys())
 
 
 def test_ordenar_chaves_teses_usa_preferencia_salva(tmp_path, monkeypatch):
