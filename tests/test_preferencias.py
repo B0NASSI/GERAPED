@@ -1,3 +1,5 @@
+import json
+
 import preferencias
 from teses import TESES
 
@@ -47,6 +49,36 @@ def test_ntp_duplicado_e_cat_duplicada_vem_logo_apos_sobreposicao_na_ordem_padra
     idx_cat = preferencias.ORDEM_PADRAO.index('cat_duplicada')
     assert idx_ntp == idx_sobreposicao + 1
     assert idx_cat == idx_ntp + 1
+
+
+def test_migracao_1_2_2_encaixa_convertido_ntp_e_cat_na_leitura(tmp_path, monkeypatch):
+    caminho = _isolar(tmp_path, monkeypatch)
+    ordem_antiga = [
+        'contestacao_administrativa', 'prescricao_quinquenal', 'cat_nao_vinculada',
+        'acidente_sem_relacao_empresa', 'acidente_trajeto', 'natureza_previdenciaria',
+        'restabelecimento_beneficio_anterior', 'beneficio_cancelado_revogado', 'erro_implantacao',
+        'acidente_outro_estabelecimento', 'concomitancia_outro_beneficio', 'dib_igual_dcb',
+        'ausencia_nexo_causal_concausalidade', 'acidente_anterior_2007', 'custo_cessado',
+        'sobreposicao_concomitancia_beneficios', 'erro_vinculos', 'erro_massa_salarial', 'rotatividade',
+    ]
+    # escreve o json bruto, sem 'migrado_1_2_2' - simula um arquivo salvo de verdade antes
+    # dessa migração existir (salvar_ordem_teses já marcaria a flag, o que pularia a migração)
+    with open(caminho, 'w', encoding='utf-8') as f:
+        json.dump({'ordem_teses': ordem_antiga}, f)
+    resultado = preferencias.ler_ordem_teses()
+    assert resultado.index('convertido') == resultado.index('acidente_trajeto') + 1
+    assert resultado.index('ntp_duplicado') == resultado.index('sobreposicao_concomitancia_beneficios') + 1
+    assert resultado.index('cat_duplicada') == resultado.index('ntp_duplicado') + 1
+    # a migração persiste no arquivo - uma segunda leitura não move mais nada
+    assert preferencias.ler_ordem_teses() == resultado
+
+
+def test_migracao_1_2_2_nao_repete_se_pessoa_remover_tese_de_proposito_depois(tmp_path, monkeypatch):
+    _isolar(tmp_path, monkeypatch)
+    # salvar_ordem_teses já marca a flag de migrado - simula a pessoa removendo de
+    # propósito 'cat_duplicada' da ordem numa edição posterior em "Ordem" e salvando.
+    preferencias.salvar_ordem_teses(['rotatividade', 'convertido', 'ntp_duplicado'])
+    assert preferencias.ler_ordem_teses() == ['rotatividade', 'convertido', 'ntp_duplicado']
 
 
 def test_ordem_padrao_chaves_ignora_preferencia_salva(tmp_path, monkeypatch):

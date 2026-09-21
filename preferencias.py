@@ -42,6 +42,35 @@ def _caminho_preferencias():
     return os.path.join(base, 'preferencias.json')
 
 
+# Migração pontual da v1.2.2: quem salvou uma ordem em "Ordem" antes de CONVERTIDO, NTP
+# DUPLICADO e CAT DUPLICADA existirem ficava sem essas 3 teses na lista salva (iam pro
+# final, fora da posição curada, da próxima vez que abrissem a tela). Encaixa essas 3 na
+# posição certa - mas só a primeira vez que o arquivo for lido após essa atualização (flag
+# 'migrado_1_2_2' no json, setada por salvar_ordem_teses a partir daqui pra frente): se a
+# pessoa depois tirar de propósito uma dessas teses da ordem, a migração não pode voltar a
+# adicionar de novo. Pedido do escritório: só essa atualização mexe na ordem já salva pelo
+# usuário - por isso é hardcoded pra essas 3 chaves, e não um mecanismo genérico (teses
+# futuras não devem reordenar a preferência salva; ver ORDEM_PADRAO/_completar_e_filtrar).
+def _migrar_teses_1_2_2(ordem):
+    ordem = list(ordem)
+    if 'convertido' not in ordem:
+        if 'acidente_trajeto' in ordem:
+            ordem.insert(ordem.index('acidente_trajeto') + 1, 'convertido')
+        else:
+            ordem.append('convertido')
+    if 'ntp_duplicado' not in ordem:
+        if 'sobreposicao_concomitancia_beneficios' in ordem:
+            ordem.insert(ordem.index('sobreposicao_concomitancia_beneficios') + 1, 'ntp_duplicado')
+        else:
+            ordem.append('ntp_duplicado')
+    if 'cat_duplicada' not in ordem:
+        if 'ntp_duplicado' in ordem:
+            ordem.insert(ordem.index('ntp_duplicado') + 1, 'cat_duplicada')
+        else:
+            ordem.append('cat_duplicada')
+    return ordem
+
+
 def ler_ordem_teses():
     """Lista de chaves de tese na ordem salva pelo usuário, ou None se nunca foi salva
     (nesse caso o padrão é ordem alfabética pelo nome de exibição)."""
@@ -54,7 +83,12 @@ def ler_ordem_teses():
         ordem = dados.get('ordem_teses')
         if not isinstance(ordem, list):
             return None
-        return [chave for chave in ordem if chave in TESES]
+        ordem = [chave for chave in ordem if chave in TESES]
+        if not dados.get('migrado_1_2_2'):
+            ordem_migrada = _migrar_teses_1_2_2(ordem)
+            salvar_ordem_teses(ordem_migrada)
+            return ordem_migrada
+        return ordem
     except Exception:
         return None
 
@@ -62,7 +96,10 @@ def ler_ordem_teses():
 def salvar_ordem_teses(ordem_chaves):
     try:
         with open(_caminho_preferencias(), 'w', encoding='utf-8') as f:
-            json.dump({'ordem_teses': list(ordem_chaves)}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {'ordem_teses': list(ordem_chaves), 'migrado_1_2_2': True},
+                f, ensure_ascii=False, indent=2,
+            )
     except Exception:
         pass
 
