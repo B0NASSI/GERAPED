@@ -1,0 +1,7 @@
+GERAPED 1.3.0
+
+- Interface redesenhada: barra lateral de navegação, com "Pedidos", "Histórico" e "Ordem".
+- Histórico e Ordem abrem dentro da própria janela, sem mais janelas separadas.
+- Novo "Manual rápido" no rodapé da sidebar, com as regras que mais geram dúvida (tese subsidiária, espécie x quantidade, item do pedido).
+- PRESCRIÇÃO QUINQUENAL e CONTESTAÇÃO ADMINISTRATIVA não admitem mais pedido subsidiário.
+- Corrigido texto que sempre dizia "benefícios acidentários" mesmo quando as espécies escolhidas eram todas previdenciárias (B31/B36).

@@ -11,6 +11,7 @@ class TestTesePermiteSubsidiario:
     @pytest.mark.parametrize('tese_key', [
         'cat_nao_vinculada', 'ntp_duplicado', 'cat_duplicada',
         'erro_massa_salarial', 'erro_vinculos', 'rotatividade',
+        'prescricao_quinquenal', 'contestacao_administrativa',
     ])
     def test_teses_sem_subsidiario(self, tese_key):
         assert tese_permite_subsidiario(tese_key) is False

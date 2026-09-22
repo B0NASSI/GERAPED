@@ -16,6 +16,11 @@ TIPO_BENEFICIO_POR_ESPECIE = {
     'B36': 'auxílio-acidente previdenciário',
 }
 
+# B31/B36 são benefícios PREVIDENCIÁRIOS; B91-B94 são ACIDENTÁRIOS (nome dado quando duas ou
+# mais espécies são citadas juntas - ver _descricao_beneficios em gerador_pedido.py, que com
+# uma só espécie usa o texto completo de TIPO_BENEFICIO_POR_ESPECIE em vez desse adjetivo).
+ESPECIES_PREVIDENCIARIAS = {'B31', 'B36'}
+
 TESES = {
     'acidente_trajeto': {
         'nome': 'TRAJETO',
@@ -225,6 +230,9 @@ TESES = {
         },
         'ignora_especie': True,
         'ignora_quantidade': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
     'contestacao_administrativa': {
         'nome': 'CONTESTAÇÃO ADMINISTRATIVA',
@@ -235,6 +243,9 @@ TESES = {
         },
         'ignora_especie': True,
         'ignora_quantidade': True,
+        # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
+        # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
+        'permite_subsidiario': False,
     },
 }
 

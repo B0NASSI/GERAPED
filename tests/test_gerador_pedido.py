@@ -50,6 +50,12 @@ class TestExclusaoBeneficioPadrao:
         assert 'dos índices do FAP' in t
         assert 'decorrentes de acidentes de trajeto' in t
 
+    def test_plural_multiplas_especies_previdenciarias(self):
+        # B31/B36 são previdenciários, não acidentários (bug real: o texto sempre dizia
+        # "acidentários", mesmo quando as espécies escolhidas eram só B31/B36)
+        t = texto(pedido_base(quantidade=2, especies=['B31', 'B36'], tese_key='convertido'))
+        assert '2 (dois) benefícios previdenciários, espécies B31 e B36' in t
+
     def test_verbo_sempre_plural_em_nexo_afastado(self):
         # motivo_singular e motivo_plural são iguais nessa tese (sujeito composto) mesmo
         # com um só benefício - ver comentário em teses.py

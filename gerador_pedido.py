@@ -8,7 +8,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
-from teses import TESES, TIPO_BENEFICIO_POR_ESPECIE, PARAMETROS_TESE
+from teses import TESES, TIPO_BENEFICIO_POR_ESPECIE, PARAMETROS_TESE, ESPECIES_PREVIDENCIARIAS
 from utilitarios import numero_e_extenso
 
 FONTE_NOME = 'Segoe UI'
@@ -95,7 +95,12 @@ def _descricao_beneficios(especies, singular):
         return f'{substantivo} de {tipo_nome}, espécie {especies[0]}'
 
     lista = ', '.join(especies[:-1]) + f' e {especies[-1]}'
-    sufixo = 'acidentário' if singular else 'acidentários'
+    # B31/B36 (previdenciárias) vs. B91-B94 (acidentárias) - se TODAS as espécies citadas
+    # forem previdenciárias, o texto tem que dizer "previdenciários", não "acidentários"
+    # (valor fixo antigo, que ignorava a espécie escolhida).
+    previdenciario = especies and all(e in ESPECIES_PREVIDENCIARIAS for e in especies)
+    base = 'previdenciário' if previdenciario else 'acidentário'
+    sufixo = base if singular else base + 's'
     return f'{substantivo} {sufixo}, espécies {lista}'
 
 

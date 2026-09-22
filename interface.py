@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
@@ -9,7 +10,6 @@ import ttkbootstrap as ttk
 from PIL import Image, ImageTk
 
 import tema
-import visual
 from teses import TESES, TIPO_BENEFICIO_POR_ESPECIE, nome_para_chave, PARAMETROS_TESE, chave_para_opcao_parametro
 from gerador_pedido import gerar_documento, COR_ITEM_PETICAO
 from validacao import (
@@ -30,8 +30,91 @@ def _chaves_teses_subsidiarias_compativeis():
         if 'motivo_singular' in t or t.get('tipo_clausula') == 'custo_cessado'
     ]
 
-LARGURA_BANNER = 760
-ALTURA_BANNER  = 110
+LARGURA_SIDEBAR = 232
+
+# RASCUNHO - conteúdo do "Manual rápido" (ver _mostrar_manual). Cobre as regras que mais
+# geram dúvida/erro na prática (subsidiária, espécie x quantidade, item repetido) - revisar
+# e ajustar o texto antes de considerar pronto pra usuário final.
+TEXTO_MANUAL = """\
+GERAPED — Gerador de Pedidos
+
+Ferramenta da equipe de revisão de insumos do FAP
+
+Rodriguez & Sousa Advogados Associados
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMO FUNCIONA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cada "Pedido" na tela monta o texto de UM pedido de exclusão da
+petição inicial:
+
+  1. Escolha a tese principal
+  2. Informe a quantidade de benefícios e a(s) espécie(s)
+  3. Informe o item da petição inicial a que esse pedido se refere
+  4. Clique em "Gerar Word" quando todos os pedidos estiverem prontos
+
+Use "+ Adicionar pedido" para montar vários pedidos de uma vez -
+todos entram no mesmo documento Word, na ordem em que aparecem
+na tela.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TESE PRINCIPAL X TESE SUBSIDIÁRIA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Possui pedido subsidiário?" adiciona uma cláusula alternativa,
+pro caso de o juiz não acatar a tese principal.
+
+  - Uma tese subsidiária sem nenhum benefício informado vale pra
+    TODOS os benefícios do pedido principal.
+  - Ao informar um benefício específico numa tese subsidiária, o
+    número dele é obrigatório.
+  - Uma tese subsidiária, sozinha, não pode citar mais benefícios
+    do que a quantidade do pedido principal.
+
+Algumas teses NÃO admitem pedido subsidiário (o texto delas não
+comporta essa estrutura) - o checkbox fica desabilitado para:
+CAT NÃO VINCULADA, NTP DUPLICADO, CAT DUPLICADA, ERRO DE MASSA
+SALARIAL, ERRO DE VÍNCULOS, ROTATIVIDADE, PRESCRIÇÃO QUINQUENAL
+e CONTESTAÇÃO ADMINISTRATIVA.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUANTIDADE X ESPÉCIE(S) DO BENEFÍCIO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Não dá pra marcar mais espécies do que a quantidade informada
+(ex: quantidade 2 aceita no máximo 2 espécies marcadas).
+
+Algumas teses restringem quais espécies podem ser usadas (ex:
+CONVERTIDO só aceita B31/B36) ou nem usam espécie/quantidade (ex:
+ROTATIVIDADE, NTP DUPLICADO) - nesses casos o campo correspondente
+fica desabilitado na tela.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ITEM DO PEDIDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cada pedido PRINCIPAL precisa referenciar um item diferente da
+petição inicial - o GERAPED avisa se dois pedidos principais usarem
+o mesmo item. Pedidos subsidiários ficam de fora dessa checagem
+(é comum retomarem o item do pedido principal).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ORDEM E HISTÓRICO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Ordem" define em que sequência as teses aparecem na lista de
+"Tese principal" - útil pra deixar as mais usadas no topo. "Restaurar
+padrão" volta pra ordem definida pelo escritório.
+
+"Histórico" lista os últimos documentos Word gerados nesta máquina,
+com atalho pra reabrir o arquivo.
+"""
 
 
 def _ignorar_scroll(event):
@@ -61,7 +144,7 @@ def _retangulo_monitor_atual(root):
     """(esquerda, topo, direita, baixo) do monitor do Windows que contém root - usado no
     lugar de winfo_screenwidth()/height(), que no Tk sempre reportam as dimensões do
     monitor PRINCIPAL, mesmo com o app aberto num monitor secundário. Sem isso, janelas
-    secundárias (Opções, Histórico, Notas de atualização...) eram empurradas de volta pro
+    secundárias (Ordem, Histórico, Notas de atualização...) eram empurradas de volta pro
     monitor principal em setups com múltiplos monitores. None se não for Windows ou algo
     der errado (nesse caso quem chama cai de volta em winfo_screenwidth/height)."""
     if sys.platform != 'win32':
@@ -110,11 +193,15 @@ def _centralizar_janela(janela, root, largura, altura):
     janela.geometry(f'{largura}x{altura}+{x}+{y}')
 
 
+_MARCADOR_ITEM = re.compile(r'^(-|\d+\.)\s+')
+
+
 def _preparar_paragrafos_notas(texto):
     """Reagrupa o texto (quebrado em linhas fixas no .txt) em parágrafos lógicos, pra poder
     rejustificar do zero na largura real da janela. Linhas em branco separam blocos; dentro
-    de um bloco, uma linha começando com "- " inicia um item de lista, e as linhas
-    indentadas seguintes são continuação do mesmo item (juntadas por espaço)."""
+    de um bloco, uma linha começando com "- " ou "1. " (lista numerada, usada no Manual
+    rápido) inicia um item de lista, e as linhas indentadas seguintes são continuação do
+    mesmo item (juntadas por espaço)."""
     blocos = []
     bloco_atual = []
     item_atual = None
@@ -128,10 +215,12 @@ def _preparar_paragrafos_notas(texto):
                 blocos.append(bloco_atual)
                 bloco_atual = []
             continue
-        if linha.lstrip().startswith('- '):
+        casado = _MARCADOR_ITEM.match(linha.lstrip())
+        if casado:
             if item_atual is not None:
                 bloco_atual.append(item_atual)
-            item_atual = ('- ', linha.lstrip()[2:].strip())
+            marcador = casado.group(0)
+            item_atual = (marcador, linha.lstrip()[len(marcador):].strip())
         elif item_atual is not None:
             item_atual = (item_atual[0], item_atual[1] + ' ' + linha.strip())
         else:
@@ -141,6 +230,51 @@ def _preparar_paragrafos_notas(texto):
     if bloco_atual:
         blocos.append(bloco_atual)
     return blocos
+
+
+def _dividir_manual(texto):
+    """Separa TEXTO_MANUAL em segmentos ('vazio'|'regra'|'titulo'|'prosa') - as linhas de
+    régua (só "━") e de título de seção NUNCA entram no fluxo de justificação (ver
+    _mostrar_manual): são estruturais, não prosa, e tentar justificá-las ou deixar que se
+    misturem com o parágrafo vizinho (por estarem coladas, sem linha em branco entre
+    régua/título/régua) resultava em texto quebrado/espremido. Só o texto "normal" vira
+    parágrafo prosa, passível de reflow/justificação.
+
+    Um título é identificado por estar tudo em maiúsculas E vir logo após uma linha de
+    régua (o padrão real dos cabeçalhos: régua/título/régua) - não basta estar em
+    maiúsculas: uma lista de nomes de teses (ex: "CAT NÃO VINCULADA, NTP DUPLICADO...")
+    também é toda maiúscula, mas é prosa comum e precisa ser reflowada/justificada como
+    qualquer outro parágrafo, não tratada como título."""
+    segmentos = []
+    prosa_atual = []
+    ultimo_tipo = None
+
+    def fecha_prosa():
+        if prosa_atual:
+            segmentos.append(('prosa', '\n'.join(prosa_atual)))
+            prosa_atual.clear()
+
+    for linha_bruta in texto.split('\n'):
+        linha = linha_bruta.rstrip()
+        stripped = linha.strip()
+        if not stripped:
+            fecha_prosa()
+            segmentos.append(('vazio', ''))
+            tipo = 'vazio'
+        elif set(stripped) == {'━'}:
+            fecha_prosa()
+            segmentos.append(('regra', stripped))
+            tipo = 'regra'
+        elif ultimo_tipo == 'regra' and stripped == stripped.upper() and any(c.isalpha() for c in stripped):
+            fecha_prosa()
+            segmentos.append(('titulo', stripped))
+            tipo = 'titulo'
+        else:
+            prosa_atual.append(linha)
+            tipo = 'prosa'
+        ultimo_tipo = tipo
+    fecha_prosa()
+    return segmentos
 
 
 def _justificar_linha(palavras, fonte, largura_disponivel):
@@ -303,6 +437,21 @@ def _reconstruir_combo_parametro(frame_parametro, combo_tese, label_widget=None)
     return None
 
 
+def _carregar_logo_para_fundo_escuro(caminho, altura):
+    """Logo do escritório para usar sobre o azul-marinho: o azul do logo vira
+    branco e o laranja do "&" fica como está."""
+    imagem = Image.open(caminho).convert('RGBA')
+    imagem = imagem.resize((max(1, int(imagem.width * altura / imagem.height)), altura), Image.LANCZOS)
+    pixels = imagem.load()
+    for y in range(imagem.height):
+        for x in range(imagem.width):
+            r, g, b, a = pixels[x, y]
+            laranja = r > 180 and 60 < g < 170 and b < 90
+            if a and not laranja:
+                pixels[x, y] = (255, 255, 255, a)
+    return ImageTk.PhotoImage(imagem)
+
+
 class ComboboxPesquisavel(ttk.Combobox):
     """Combobox que filtra a lista de valores conforme o usuário digita."""
 
@@ -318,7 +467,7 @@ class ComboboxPesquisavel(ttk.Combobox):
         self.bind('<Escape>', self._ao_fechar_lista, add='+')
 
     def atualizar_valores(self, novos_valores):
-        """Troca a lista de opções (ex: nova ordem de teses salva em Opções), preservando o
+        """Troca a lista de opções (ex: nova ordem de teses salva em Ordem), preservando o
         valor atualmente selecionado."""
         selecionado = self.get()
         self._valores = list(novos_valores)
@@ -426,7 +575,7 @@ class GrupoSubsidiario:
         # exceto Custo cessado, que tem um motivo por tipo (ver _motivo em gerador_pedido.py).
         nomes_teses = ordenar_nomes_teses(_chaves_teses_subsidiarias_compativeis())
 
-        self.frame = ttk.Labelframe(parent, text=f"Tese subsidiária {numero}", padding=12, bootstyle='secondary')
+        self.frame = ttk.Labelframe(parent, text=f"Tese subsidiária {numero}", padding=12)
         self.frame.pack(fill='x', expand=True, pady=(0, 8))
 
         linha = ttk.Frame(self.frame)
@@ -449,7 +598,7 @@ class GrupoSubsidiario:
         ttk.Label(
             self.frame,
             text="Se todos os benefícios forem subsidiários da mesma tese, não adicione benefícios.",
-            bootstyle='secondary', font=('Segoe UI', 8), wraplength=560, justify='left',
+            style='Ajuda.TLabel', wraplength=560, justify='left',
         ).pack(anchor='w', pady=(0, 6))
         self.frame_beneficios = ttk.Frame(self.frame)
         self.frame_beneficios.pack(fill='x', anchor='w')
@@ -546,7 +695,7 @@ class BlocoPedido:
         self.on_remover = on_remover
         nomes_teses = ordenar_nomes_teses()
 
-        self.frame = ttk.Labelframe(parent, text=f"Pedido {numero}", padding=14, bootstyle='secondary')
+        self.frame = ttk.Labelframe(parent, text=f"Pedido {numero}", padding=14)
         self.frame.pack(fill='x', expand=True, pady=(0, 14), padx=2)
 
         # Espaço fixo entre a coluna de rótulos e a coluna de campos (~1cm), para não ficar
@@ -818,56 +967,52 @@ class Janela:
         # selecionada, o que reconstrói o campo de parâmetro abaixo e faz o bloco pular.
         root.unbind_class('TCombobox', '<MouseWheel>')
 
-        # ── Banner (regenerado ao redimensionar, para cobrir a largura toda) ────
-        self._icone_banner = _res('icone.ico')
-        self._largura_banner_atual = LARGURA_BANNER
-        self._debounce_banner_id = None
-        self._label_banner = tk.Label(root, borderwidth=0, background=tema.COR_PRIMARIA)
-        self._label_banner.pack(fill='x')
-        self._atualizar_banner(LARGURA_BANNER)
-        self._label_banner.bind('<Configure>', self._ao_redimensionar_banner)
+        # ── Barra lateral ────────────────────────────────────────────────────
+        self._montar_sidebar(root)
 
-        # ── Rodapé (pack side=bottom ANTES do conteúdo) ───────────────────────
-        rodape = ttk.Frame(root, padding=(14, 8, 14, 8))
-        rodape.pack(fill='x', side='bottom')
-        caminho_logo = _res('logo_completa.png')
-        if os.path.isfile(caminho_logo):
-            img = Image.open(caminho_logo).convert('RGBA')
-            h = 26
-            w = int(img.width * h / img.height)
-            self._logo = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
-            tk.Label(rodape, image=self._logo, borderwidth=0, background=tema.COR_FUNDO).pack(side='left')
-        ttk.Label(rodape, text=f'Versão {self._versao}', bootstyle='secondary', font=('Segoe UI', 8)).pack(side='right')
-        ttk.Label(rodape, text=' - ', bootstyle='secondary', font=('Segoe UI', 8)).pack(side='right')
-        # "Notas de atualização" fica discreta aqui, como um link com ícone junto da versão
-        # (agrupados com um "-" entre os dois, pra não parecer solto) - não é algo que se
-        # consulte com frequência, então não precisa de um botão próprio lá em cima (a
-        # barra de topo fica só com Opções/Histórico, que são ações).
-        link_notas = ttk.Label(
-            rodape, text='ⓘ Notas de atualização', bootstyle='secondary', font=('Segoe UI', 8),
-            cursor='hand2',
-        )
-        link_notas.pack(side='right')
-        link_notas.bind('<Button-1>', lambda e: self._mostrar_notas_atualizacao())
+        # ── Área principal: páginas empilhadas (Pedidos / Histórico / Ordem) ─
+        # As 3 páginas da sidebar (Pedidos, Histórico, Ordem) ficam todas dentro da mesma
+        # janela, sobrepostas em area_paginas (grid + tkraise), em vez de Histórico/Ordem
+        # abrirem um Toplevel próprio - nesse layout com sidebar, uma segunda janela
+        # flutuante quebrava a sensação de "app de uma tela só" que a barra lateral propõe.
+        # Histórico e Ordem reconstroem o conteúdo toda vez que a página é aberta (dados
+        # sempre atuais; edição de Ordem não salva sem clicar em "Salvar" - trocar de
+        # página sem salvar simplesmente descarta o que tinha mudado, como um Cancelar).
+        principal = ttk.Frame(root)
+        principal.pack(side='left', fill='both', expand=True)
 
-        # ── Barra de botões (side=bottom) ────────────────────────────────────
-        ttk.Separator(root).pack(fill='x', side='bottom')
-        botoes = ttk.Frame(root, padding=(18, 10, 18, 12))
+        area_paginas = ttk.Frame(principal)
+        area_paginas.pack(fill='both', expand=True)
+        area_paginas.grid_rowconfigure(0, weight=1)
+        area_paginas.grid_columnconfigure(0, weight=1)
+
+        self._pagina_pedidos = ttk.Frame(area_paginas)
+        self._pagina_historico = ttk.Frame(area_paginas)
+        self._pagina_ordem = ttk.Frame(area_paginas)
+        for pagina in (self._pagina_pedidos, self._pagina_historico, self._pagina_ordem):
+            pagina.grid(row=0, column=0, sticky='nsew')
+
+        botoes = ttk.Frame(self._pagina_pedidos, padding=(28, 12, 28, 16))
         botoes.pack(fill='x', side='bottom')
-        ttk.Button(botoes, text="+ Adicionar pedido", command=self.adicionar_pedido, bootstyle='primary').pack(side='left')
-        ttk.Button(botoes, text="Limpar", command=self._limpar_tudo, bootstyle='danger-outline').pack(side='left', padx=(8, 0))
+        ttk.Separator(self._pagina_pedidos).pack(fill='x', side='bottom')
+        ttk.Button(botoes, text="+ Adicionar pedido", command=self.adicionar_pedido, bootstyle='primary-outline').pack(side='left')
+        ttk.Button(botoes, text="Limpar", command=self._limpar_tudo, bootstyle='danger-link').pack(side='left', padx=(8, 0))
         ttk.Button(botoes, text="Gerar Word", bootstyle='secondary', command=self.gerar).pack(side='right')
-        ttk.Button(botoes, text="Abrir documento", command=self._abrir_ultimo_documento, bootstyle='primary-outline').pack(side='right', padx=(0, 8))
-        ttk.Button(botoes, text="Abrir pasta", command=self._abrir_pasta_ultimo_documento, bootstyle='primary-outline').pack(side='right', padx=(0, 8))
+        # só aparecem depois que existe um documento gerado
+        self._botoes_resultado = ttk.Frame(botoes)
+        ttk.Button(self._botoes_resultado, text="Abrir documento", command=self._abrir_ultimo_documento, bootstyle='light').pack(side='left', padx=(0, 8))
+        ttk.Button(self._botoes_resultado, text="Abrir pasta", command=self._abrir_pasta_ultimo_documento, bootstyle='light').pack(side='left', padx=(0, 12))
 
-        # ── Área de conteúdo (preenche o espaço restante) ────────────────────
-        container = ttk.Frame(root, padding=(18, 12, 18, 12))
+        container = ttk.Frame(self._pagina_pedidos, padding=(28, 24, 20, 12))
         container.pack(fill='both', expand=True)
 
-        barra_topo = ttk.Frame(container)
-        barra_topo.pack(fill='x', pady=(0, 10))
-        ttk.Button(barra_topo, text="Histórico", command=self._mostrar_historico, bootstyle='primary-outline').pack(side='right')
-        ttk.Button(barra_topo, text="Ordem", command=self._mostrar_opcoes, bootstyle='primary-outline').pack(side='right', padx=(0, 10))
+        cabecalho = ttk.Frame(container)
+        cabecalho.pack(fill='x', pady=(0, 16))
+        ttk.Label(cabecalho, text="Pedidos", style="Titulo.TLabel").pack(anchor='w')
+        ttk.Label(
+            cabecalho, text="Monte os pedidos de exclusão de benefícios e gere o texto em Word",
+            style="Descricao.TLabel",
+        ).pack(anchor='w', pady=(2, 0))
 
         self.canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0, background=tema.COR_FUNDO)
 
@@ -907,30 +1052,105 @@ class Janela:
         # que o loop principal começar a processar eventos, já com o layout final.
         self.root.after_idle(self._corrigir_posicao_inicial)
 
-    def _atualizar_banner(self, largura):
-        largura = max(largura, 300)
-        self._imagem_banner = ImageTk.PhotoImage(
-            visual.gerar_banner(
-                largura=largura,
-                altura=ALTURA_BANNER,
-                cor_inicio=tema.COR_PRIMARIA,
-                cor_fim='#1A1C3D',
-                cor_destaque=tema.COR_SECUNDARIA,
-                icone_path=self._icone_banner,
-                titulo='GERAPED - Gerador de Pedidos',
-                subtitulo='Monte os pedidos de exclusão de benefícios e gere o texto em Word',
-            )
-        )
-        self._label_banner.configure(image=self._imagem_banner)
-        self._largura_banner_atual = largura
+        self._mostrar_pagina('pedidos')
 
-    def _ao_redimensionar_banner(self, event):
-        if abs(event.width - self._largura_banner_atual) < 4:
-            return
-        if self._debounce_banner_id:
-            self.root.after_cancel(self._debounce_banner_id)
-        largura = event.width
-        self._debounce_banner_id = self.root.after(120, lambda: self._atualizar_banner(largura))
+    def _montar_sidebar(self, root):
+        barra = ttk.Frame(root, style="Sidebar.TFrame", width=LARGURA_SIDEBAR)
+        barra.pack(side='left', fill='y')
+        barra.pack_propagate(False)
+
+        topo = ttk.Frame(barra, style="Sidebar.TFrame", padding=(20, 26, 20, 18))
+        topo.pack(fill='x')
+        caminho_logo = self._res('logo_completa.png')
+        if os.path.isfile(caminho_logo):
+            self._imagem_marca = _carregar_logo_para_fundo_escuro(caminho_logo, 40)
+            ttk.Label(topo, image=self._imagem_marca, style="Sidebar.TLabel").pack(anchor='w')
+        ttk.Frame(barra, style="Acento.TFrame", height=3).pack(fill='x', padx=20)
+
+        produto = ttk.Frame(barra, style="Sidebar.TFrame", padding=(20, 16, 20, 14))
+        produto.pack(fill='x')
+        ttk.Label(produto, text="GERAPED", style="Sidebar.TLabel", font=("Segoe UI", 20, "bold")).pack(anchor='w')
+        ttk.Label(produto, text="Gerador de Pedidos", style="SidebarSuave.TLabel").pack(anchor='w')
+
+        # As 3 páginas (Pedidos/Histórico/Ordem) ficam sobrepostas na mesma janela (ver
+        # area_paginas no __init__) - aqui só guardamos as referências de cada linha
+        # (acento + botão) pra alternar o destaque visual em _mostrar_pagina, já que agora
+        # qualquer uma das 3 pode estar ativa (antes só "Pedidos" existia e ficava sempre
+        # marcada).
+        self._linhas_nav = {}
+        for nome, texto, comando in (
+            ('pedidos', "☰   Pedidos", lambda: self._mostrar_pagina('pedidos')),
+            ('historico', "↻   Histórico", lambda: self._mostrar_pagina('historico')),
+            ('ordem', "⚙   Ordem", lambda: self._mostrar_pagina('ordem')),
+        ):
+            linha = ttk.Frame(barra, style="Sidebar.TFrame")
+            linha.pack(fill='x')
+            acento = ttk.Frame(linha, style="Sidebar.TFrame", width=4)
+            acento.pack(side='left', fill='y')
+            botao = ttk.Button(linha, text=texto, style="Nav.TButton", command=comando)
+            botao.pack(side='left', fill='x', expand=True)
+            self._linhas_nav[nome] = (acento, botao)
+
+        rodape = ttk.Frame(barra, style="Sidebar.TFrame", padding=(0, 0, 0, 16))
+        rodape.pack(side='bottom', fill='x')
+        # divisor sutil separando o rodapé do resto da sidebar - sem ele o rodapé ficava
+        # "boiando" no meio do azul, sem nada delimitando onde a navegação termina. side=
+        # 'bottom' e packado DEPOIS de "rodape" (que também é 'bottom') - assim ele ocupa a
+        # fatia logo ACIMA do rodapé, não logo abaixo dos itens de navegação lá em cima
+        # (pack empilha widgets 'bottom' na ordem em que são chamados, de baixo pra cima).
+        ttk.Frame(barra, style="SidebarDivisor.TFrame", height=1).pack(side='bottom', fill='x', padx=20, pady=(0, 4))
+        self._criar_link_sidebar(rodape, 'ⓘ', 'Notas de atualização', self._mostrar_notas_atualizacao)
+        self._criar_link_sidebar(rodape, '?', 'Manual rápido', self._mostrar_manual)
+        ttk.Label(rodape, text=f"Versão {self._versao}", style="SidebarSuave.TLabel").pack(anchor='w', padx=20, pady=(12, 0))
+
+    def _criar_link_sidebar(self, pai, icone, texto, comando):
+        """Link do rodapé da barra lateral (ícone + texto). Dois rótulos em vez de um único
+        Button com "ícone + espaços + título": o ícone fica numa coluna de largura FIXA EM
+        PIXELS (pack_propagate desligado), então o texto sempre começa no mesmo X."""
+        linha = ttk.Frame(pai, style="Sidebar.TFrame", cursor='hand2')
+        linha.pack(fill='x')
+        caixa_icone = ttk.Frame(linha, style="Sidebar.TFrame", width=28, height=24)
+        caixa_icone.pack(side='left', padx=(20, 0), pady=6)
+        caixa_icone.pack_propagate(False)
+        rotulo_icone = ttk.Label(caixa_icone, text=icone, style="SidebarIcone.TLabel", anchor='center')
+        rotulo_icone.pack(fill='both', expand=True)
+        rotulo_texto = ttk.Label(linha, text=texto, style="SidebarLink.TLabel", anchor='w')
+        rotulo_texto.pack(side='left', fill='x', expand=True, pady=6)
+
+        def _ao_passar(_evt=None):
+            rotulo_icone.configure(style="SidebarIconeAtivo.TLabel")
+            rotulo_texto.configure(style="SidebarLinkAtivo.TLabel")
+
+        def _ao_sair(_evt=None):
+            rotulo_icone.configure(style="SidebarIcone.TLabel")
+            rotulo_texto.configure(style="SidebarLink.TLabel")
+
+        for widget in (linha, caixa_icone, rotulo_icone, rotulo_texto):
+            widget.configure(cursor='hand2')
+            widget.bind('<Enter>', _ao_passar)
+            widget.bind('<Leave>', _ao_sair)
+            widget.bind('<Button-1>', lambda _evt: comando())
+
+    def _mostrar_pagina(self, nome):
+        """Traz uma das 3 páginas (pedidos/historico/ordem) pra frente (tkraise) e destaca
+        o item correspondente na sidebar. Histórico e Ordem reconstroem o conteúdo do zero
+        a cada troca - editar a ordem e sair sem clicar "Salvar" simplesmente descarta a
+        mudança (equivalente a fechar/cancelar na antiga janela separada)."""
+        paginas = {
+            'pedidos': self._pagina_pedidos,
+            'historico': self._pagina_historico,
+            'ordem': self._pagina_ordem,
+        }
+        if nome == 'historico':
+            self._construir_pagina_historico()
+        elif nome == 'ordem':
+            self._construir_pagina_ordem()
+        paginas[nome].tkraise()
+
+        for chave, (acento, botao) in self._linhas_nav.items():
+            ativo = chave == nome
+            acento.configure(style="Acento.TFrame" if ativo else "Sidebar.TFrame")
+            botao.configure(style="NavAtivo.TButton" if ativo else "Nav.TButton")
 
     def _corrigir_posicao_inicial(self):
         self.root.update_idletasks()
@@ -1045,7 +1265,7 @@ class Janela:
             pass
         return []
 
-    # ── Opções (ordem das teses) ─────────────────────────────────────────────
+    # ── Ordem (ordem das teses) ───────────────────────────────────────────────
 
     def _atualizar_ordem_teses_em_todos_combos(self):
         """Aplica a nova ordem salva aos combos de tese já existentes na tela (pedidos e
@@ -1056,28 +1276,37 @@ class Janela:
             for grupo in bloco.grupos_subsidiarios:
                 grupo.combo_tese.atualizar_valores(ordenar_nomes_teses(chaves_subsidiaria))
 
-    def _mostrar_opcoes(self):
+    def _construir_pagina_ordem(self):
+        for filho in self._pagina_ordem.winfo_children():
+            filho.destroy()
         chaves_estado = ordenar_chaves_teses()
 
-        janela = tk.Toplevel(self.root)
-        janela.title('Ordem das teses')
-        _centralizar_janela(janela, self.root, 460, 520)
-        janela.transient(self.root)
-        janela.grab_set()
-        janela.resizable(True, True)
+        container = ttk.Frame(self._pagina_ordem, padding=(28, 24, 20, 12))
+        container.pack(fill='both', expand=True)
 
+        cabecalho = ttk.Frame(container)
+        cabecalho.pack(fill='x', pady=(0, 16))
+        ttk.Label(cabecalho, text="Ordem", style="Titulo.TLabel").pack(anchor='w')
         ttk.Label(
-            janela, text='Ordem de exibição das teses nos comboboxes:', font=('Segoe UI', 10, 'bold'),
-        ).pack(anchor='w', padx=16, pady=(14, 2))
-        ttk.Label(
-            janela, text='Selecione uma tese e use os botões para movê-la.',
-            bootstyle='secondary', font=('Segoe UI', 9),
-        ).pack(anchor='w', padx=16, pady=(0, 8))
+            cabecalho, text="Selecione uma tese e use os botões para movê-la na ordem de exibição da lista.",
+            style="Descricao.TLabel",
+        ).pack(anchor='w', pady=(2, 0))
 
-        frame_lista = ttk.Frame(janela, padding=(16, 0, 16, 0))
+        # Card com borda (igual ao "Pedido 1" da página Pedidos) em volta da lista - sem
+        # isso a lista era um Listbox branco solto direto no fundo branco da página, sem
+        # nenhum contorno que desse "chão" pro conteúdo (ficava com cara de flutuando).
+        cartao = ttk.Labelframe(container, text='Teses cadastradas', padding=14)
+        cartao.pack(fill='both', expand=True)
+
+        frame_lista = ttk.Frame(cartao)
         frame_lista.pack(fill='both', expand=True)
 
-        lista = tk.Listbox(frame_lista, activestyle='none', font=('Segoe UI', 10), exportselection=False)
+        lista = tk.Listbox(
+            frame_lista, activestyle='none', font=('Segoe UI', 10), exportselection=False,
+            relief='solid', borderwidth=1, highlightthickness=0,
+            background=tema.COR_FUNDO, foreground=tema.COR_TEXTO,
+            selectbackground=tema.COR_PRIMARIA, selectforeground='#FFFFFF',
+        )
         for chave in chaves_estado:
             lista.insert('end', TESES[chave]['nome'])
         sb = ttk.Scrollbar(frame_lista, command=lista.yview)
@@ -1110,9 +1339,9 @@ class Janela:
         def salvar():
             salvar_ordem_teses(chaves_estado)
             self._atualizar_ordem_teses_em_todos_combos()
-            janela.destroy()
+            self._mostrar_pagina('pedidos')
 
-        botoes_mover = ttk.Frame(janela, padding=(16, 8, 16, 0))
+        botoes_mover = ttk.Frame(cartao, padding=(0, 10, 0, 0))
         botoes_mover.pack(fill='x')
         ttk.Button(botoes_mover, text='▲ Mover para cima', command=lambda: mover(-1), bootstyle='primary-outline').pack(
             side='left',
@@ -1121,16 +1350,69 @@ class Janela:
             side='left', padx=(8, 0),
         )
 
-        ttk.Separator(janela).pack(fill='x', pady=(12, 0))
-        botoes = ttk.Frame(janela, padding=(16, 10))
+        ttk.Separator(container).pack(fill='x', pady=(12, 0))
+        botoes = ttk.Frame(container, padding=(0, 10, 0, 0))
         botoes.pack(fill='x')
         ttk.Button(botoes, text='Restaurar padrão', command=restaurar_padrao, bootstyle='secondary-outline').pack(
             side='left',
         )
-        ttk.Button(botoes, text='Cancelar', command=janela.destroy, bootstyle='secondary-outline').pack(
+        ttk.Button(botoes, text='Cancelar', command=lambda: self._mostrar_pagina('pedidos'), bootstyle='secondary-outline').pack(
             side='left', padx=(8, 0),
         )
         ttk.Button(botoes, text='Salvar', command=salvar, bootstyle='secondary').pack(side='right')
+
+    # ── Manual rápido ────────────────────────────────────────────────────────
+
+    def _mostrar_manual(self):
+        janela = tk.Toplevel(self.root)
+        janela.title('Manual rápido')
+        _centralizar_janela(janela, self.root, 620, 560)
+        janela.transient(self.root)
+        janela.grab_set()
+        janela.resizable(True, True)
+
+        botoes = ttk.Frame(janela, padding=(16, 10))
+        botoes.pack(fill='x', side='bottom')
+        ttk.Button(botoes, text='Fechar', command=janela.destroy, bootstyle='secondary-outline').pack(side='right')
+        ttk.Separator(janela).pack(fill='x', side='bottom', pady=(8, 0))
+
+        frame_texto = ttk.Frame(janela, padding=(16, 14, 16, 0))
+        frame_texto.pack(fill='both', expand=True)
+
+        sb = ttk.Scrollbar(frame_texto)
+        sb.pack(side='right', fill='y')
+        fonte_manual = tkfont.Font(family='Segoe UI', size=10)
+        fonte_titulo_secao = tkfont.Font(family='Segoe UI', size=10, weight='bold')
+        # wrap='none': a quebra de linha é feita por nós (_justificar_paragrafo), igual em
+        # _mostrar_notas_atualizacao - ver comentário lá.
+        txt = tk.Text(
+            frame_texto, wrap='none', font=fonte_manual,
+            yscrollcommand=sb.set, relief='flat', borderwidth=1, padx=10, pady=10,
+        )
+        sb.configure(command=txt.yview)
+        txt.pack(side='left', fill='both', expand=True)
+        txt.tag_configure('titulo_secao', font=fonte_titulo_secao)
+
+        def renderizar(_event=None):
+            largura_px = int((txt.winfo_width() - 20) * 0.90)
+            if largura_px <= 10:
+                return
+            txt.config(state='normal')
+            txt.delete('1.0', 'end')
+            for tipo, conteudo in _dividir_manual(TEXTO_MANUAL):
+                if tipo == 'vazio':
+                    txt.insert('end', '\n')
+                elif tipo == 'regra':
+                    txt.insert('end', conteudo + '\n')
+                elif tipo == 'titulo':
+                    txt.insert('end', conteudo + '\n', 'titulo_secao')
+                else:
+                    for prefixo, paragrafo in (item for bloco in _preparar_paragrafos_notas(conteudo) for item in bloco):
+                        linhas = _justificar_paragrafo(prefixo, paragrafo, fonte_manual, largura_px)
+                        txt.insert('end', '\n'.join(linhas) + '\n')
+            txt.config(state='disabled')
+
+        txt.bind('<Configure>', renderizar)
 
     # ── Notas de atualização ─────────────────────────────────────────────────
 
@@ -1244,29 +1526,39 @@ class Janela:
 
         txt.bind('<Configure>', renderizar)
 
-    def _mostrar_historico(self):
+    def _construir_pagina_historico(self):
+        for filho in self._pagina_historico.winfo_children():
+            filho.destroy()
         historico = self._ler_historico()
 
-        janela = tk.Toplevel(self.root)
-        janela.title('Histórico de documentos gerados')
-        _centralizar_janela(janela, self.root, 620, 380)
-        janela.transient(self.root)
-        janela.grab_set()
-        janela.resizable(True, True)
+        container = ttk.Frame(self._pagina_historico, padding=(28, 24, 20, 12))
+        container.pack(fill='both', expand=True)
 
-        ttk.Label(janela, text='Documentos gerados recentemente:', font=('Segoe UI', 10, 'bold')).pack(
-            anchor='w', padx=16, pady=(14, 6),
-        )
+        cabecalho = ttk.Frame(container)
+        cabecalho.pack(fill='x', pady=(0, 16))
+        ttk.Label(cabecalho, text="Histórico", style="Titulo.TLabel").pack(anchor='w')
+        ttk.Label(
+            cabecalho, text="Documentos gerados recentemente - clique duas vezes para abrir.",
+            style="Descricao.TLabel",
+        ).pack(anchor='w', pady=(2, 0))
 
-        frame_lista = ttk.Frame(janela, padding=(16, 0, 16, 0))
+        # Card com borda (igual ao "Pedido 1" da página Pedidos) em volta da lista - ver o
+        # mesmo comentário em _construir_pagina_ordem.
+        cartao = ttk.Labelframe(container, text='Documentos gerados', padding=14)
+        cartao.pack(fill='both', expand=True)
+
+        frame_lista = ttk.Frame(cartao)
         frame_lista.pack(fill='both', expand=True)
 
         cols = ('data', 'arquivo')
         tree = ttk.Treeview(frame_lista, columns=cols, show='headings', selectmode='browse', bootstyle='secondary')
-        tree.heading('data', text='Data')
-        tree.heading('arquivo', text='Arquivo')
-        tree.column('data', width=130, stretch=False)
-        tree.column('arquivo', width=440)
+        # anchor='w' nos dois (cabeçalho e coluna) - por padrão o Treeview centraliza o
+        # texto do cabeçalho mas alinha o valor das linhas à esquerda, o que destoava
+        # visualmente (cabeçalho centralizado sobre valores alinhados à esquerda).
+        tree.heading('data', text='Data', anchor='w')
+        tree.heading('arquivo', text='Arquivo', anchor='w')
+        tree.column('data', width=130, stretch=False, anchor='w')
+        tree.column('arquivo', width=440, anchor='w')
 
         sb = ttk.Scrollbar(frame_lista, command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
@@ -1291,7 +1583,7 @@ class Janela:
             if os.path.isfile(caminho):
                 os.startfile(caminho)
             else:
-                messagebox.showwarning('Arquivo não encontrado', f'O arquivo não existe mais:\n{caminho}', parent=janela)
+                messagebox.showwarning('Arquivo não encontrado', f'O arquivo não existe mais:\n{caminho}', parent=self.root)
 
         tree.bind('<Double-1>', abrir_selecionado)
 
@@ -1300,7 +1592,7 @@ class Janela:
                 'Limpar histórico',
                 'Tem certeza que deseja limpar todo o histórico de documentos gerados?\n'
                 '(Os arquivos .docx já salvos não são apagados, só a lista de histórico.)',
-                parent=janela,
+                parent=self.root,
             ):
                 return
             try:
@@ -1312,12 +1604,11 @@ class Janela:
                 tree.delete(item)
             tree.insert('', 'end', values=('—', 'Nenhum documento gerado ainda.'))
 
-        ttk.Separator(janela).pack(fill='x', pady=(8, 0))
-        botoes = ttk.Frame(janela, padding=(16, 10))
+        ttk.Separator(container).pack(fill='x', pady=(8, 0))
+        botoes = ttk.Frame(container, padding=(0, 10, 0, 0))
         botoes.pack(fill='x')
-        ttk.Button(botoes, text='Fechar', command=janela.destroy, bootstyle='secondary-outline').pack(side='left')
         ttk.Button(botoes, text='Limpar histórico', command=limpar_historico, bootstyle='danger-outline').pack(
-            side='left', padx=(8, 0),
+            side='left',
         )
         ttk.Button(botoes, text='Abrir arquivo', command=abrir_selecionado, bootstyle='secondary').pack(side='right')
 
@@ -1358,6 +1649,7 @@ class Janela:
                 return
             doc.save(caminho)
             self._ultimo_documento = caminho
+            self._botoes_resultado.pack(side='right')
             self._registrar_historico(caminho)
             messagebox.showinfo('Sucesso', f'Documento gerado em:\n{caminho}')
 
