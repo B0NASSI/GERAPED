@@ -53,7 +53,6 @@ TESES = {
     },
     'natureza_previdenciaria': {
         'nome': 'BENEFÍCIO PREVIDENCIÁRIO',
-        # singular inferido (template só mostra o plural) - ajustar se aparecer um caso real
         'motivo_singular': 'por se tratar de benefício de natureza previdenciária',
         'motivo_plural': 'por se tratar de benefícios de natureza previdenciária',
     },

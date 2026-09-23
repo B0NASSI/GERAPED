@@ -284,10 +284,14 @@ def montar_grupo_subsidiario(paragrafo, grupo, primeiro, ultimo):
 
     if grupo.get('todos_beneficios_principal'):
         # Nenhum benefício informado neste grupo - subsidiário se aplica a todos os
-        # benefícios do pedido principal (quantidade > 1), por isso sempre no plural.
+        # benefícios do pedido principal. Singular só quando a quantidade principal é 1 (aí
+        # só existe um benefício possível) - uma só espécie marcada não basta pra decidir
+        # isso sozinha, pois o pedido principal pode ter vários benefícios da mesma espécie.
+        singular = grupo.get('quantidade_principal') == 1
         lista = _formatar_lista_especies(grupo['especies_principal'])
-        _add_run(paragrafo, f'dos benefícios {lista}, ')
-        _add_run(paragrafo, _motivo(tese, singular=False, parametro_valor=parametro_valor), bold=True)
+        rotulo = 'do benefício' if singular else 'dos benefícios'
+        _add_run(paragrafo, f'{rotulo} {lista}, ')
+        _add_run(paragrafo, _motivo(tese, singular=singular, parametro_valor=parametro_valor), bold=True)
     else:
         partes = _formatar_lista_beneficios(grupo['numeros_com_especie'])
         if len(partes) == 1:

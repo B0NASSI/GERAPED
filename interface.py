@@ -4,7 +4,7 @@ import re
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 import ttkbootstrap as ttk
 from PIL import Image, ImageTk
@@ -31,6 +31,72 @@ def _chaves_teses_subsidiarias_compativeis():
     ]
 
 LARGURA_SIDEBAR = 232
+
+
+def _dialogo(widget, titulo, mensagem, icone, cor_icone, botoes):
+    """Diálogo modal customizado (ícone + mensagem + botão(ões)) - substitui o messagebox
+    nativo do Tk. O nativo, no Windows, sempre centraliza sobre a janela raiz de verdade
+    (winfo_toplevel), ignorando qualquer "parent" auxiliar que a gente crie pra tentar
+    deslocar a posição - não dava pra colocar o "Aviso" no lugar pedido usando ele. Aqui a
+    posição é 100% nossa: mesma fórmula do toast de sucesso (ver Janela._mostrar_toast),
+    que já está no lugar certo."""
+    raiz = widget.winfo_toplevel()
+    dialogo = tk.Toplevel(raiz)
+    dialogo.title(titulo)
+    dialogo.resizable(False, False)
+    dialogo.transient(raiz)
+    dialogo.configure(background=tema.COR_FUNDO)
+
+    corpo = ttk.Frame(dialogo, padding=(24, 20))
+    corpo.pack(fill='both', expand=True)
+    linha = ttk.Frame(corpo)
+    linha.pack(fill='x')
+    ttk.Label(linha, text=icone, font=('Segoe UI', 18), foreground=cor_icone).pack(side='left', padx=(0, 16))
+    ttk.Label(linha, text=mensagem, font=('Segoe UI', 10), wraplength=300, justify='left').pack(
+        side='left', fill='x', expand=True,
+    )
+
+    resultado = {'valor': None}
+
+    def escolher(valor):
+        resultado['valor'] = valor
+        dialogo.destroy()
+
+    dialogo.protocol('WM_DELETE_WINDOW', lambda: escolher(None))
+
+    rodape = ttk.Frame(corpo)
+    rodape.pack(fill='x', pady=(20, 0))
+    for i, texto in enumerate(botoes):
+        estilo = 'primary' if i == len(botoes) - 1 else 'secondary-outline'
+        ttk.Button(
+            rodape, text=texto, command=lambda v=texto: escolher(v), bootstyle=estilo, width=10,
+        ).pack(side='right', padx=(8, 0))
+
+    dialogo.update_idletasks()
+    largura, altura = dialogo.winfo_reqwidth(), dialogo.winfo_reqheight()
+    largura_conteudo = raiz.winfo_width() - LARGURA_SIDEBAR
+    x = raiz.winfo_rootx() + LARGURA_SIDEBAR + max(0, (largura_conteudo - largura) // 2)
+    y = raiz.winfo_rooty() + (raiz.winfo_height() - altura) // 2
+    dialogo.geometry(f'{largura}x{altura}+{x}+{y}')
+    dialogo.grab_set()
+    dialogo.wait_window()
+    return resultado['valor']
+
+
+def _avisar(widget, titulo, mensagem):
+    _dialogo(widget, titulo, mensagem, '⚠', tema.COR_AVISO, ('OK',))
+
+
+def _informar(widget, titulo, mensagem):
+    _dialogo(widget, titulo, mensagem, '✓', tema.COR_SUCESSO, ('OK',))
+
+
+def _erro(widget, titulo, mensagem):
+    _dialogo(widget, titulo, mensagem, '✕', tema.COR_ERRO, ('OK',))
+
+
+def _confirmar(widget, titulo, mensagem):
+    return _dialogo(widget, titulo, mensagem, '?', tema.COR_PRIMARIA, ('Cancelar', 'Sim')) == 'Sim'
 
 # RASCUNHO - conteúdo do "Manual rápido" (ver _mostrar_manual). Cobre as regras que mais
 # geram dúvida/erro na prática (subsidiária, espécie x quantidade, item repetido) - revisar
@@ -452,6 +518,40 @@ def _carregar_logo_para_fundo_escuro(caminho, altura):
     return ImageTk.PhotoImage(imagem)
 
 
+def _criar_cartao(parent, titulo, padding=14, **_ignorados):
+    """Card com título DENTRO do quadrado, encostado na borda superior (visual igual ao
+    ttk.Labelframe nativo usado antes) - mas sem usar Labelframe de verdade, que tem um bug
+    de renderização real (reproduzido isolado, fora deste app, com qualquer tema
+    ttkbootstrap): o traço da borda antes do texto do título simplesmente não desenha.
+    Inofensivo enquanto o fundo ao redor do card era branco igual ao card (o padrão usado
+    em todo o app antes) - ficou visível assim que a página passou a ter um fundo cinza ao
+    redor dos cards (ver Pagina.TFrame). Aqui a borda é só um Frame de 1px (moldura) - como
+    nada nunca desenha "por cima" dela, o bug não se aplica. 'interior' empacota o título
+    (pack) e 'conteudo' (pack) como irmãos - 'conteudo' fica livre para os filhos reais do
+    card usarem grid ou pack à vontade, sem conflitar com o pack do próprio título.
+
+    Tentativa anterior usava cantos arredondados desenhados à mão num Canvas - abandonada:
+    causava bugs visuais reais (borda invisível, corrida de redesenho em cards aninhados
+    tipo "Tese subsidiária" dentro de "Pedido") sem terminar visualmente melhor que a borda
+    quadrada simples. Card quadrado, mas 100% confiável, ganha da alternativa "bonita" mas
+    quebrada.
+
+    Retorna (casca, conteudo, rotulo_titulo): 'casca' é o que quem chama empacota/destrói;
+    'conteudo' cumpre o mesmo papel de parent pros filhos que o Labelframe cumpria antes;
+    'rotulo_titulo' é pra poder trocar o texto do título (ex: renumerar "Pedido 2" ->
+    "Pedido 1")."""
+    casca = ttk.Frame(parent, style="Pagina.TFrame")
+    moldura = tk.Frame(casca, background=tema.COR_BORDA)
+    moldura.pack(fill='both', expand=True)
+    interior = ttk.Frame(moldura, padding=(padding, padding - 4, padding, padding))
+    interior.pack(fill='both', expand=True, padx=1, pady=1)
+    rotulo_titulo = ttk.Label(interior, text=titulo, style="TituloCartaoInterno.TLabel")
+    rotulo_titulo.pack(anchor='w', pady=(0, 8))
+    conteudo = ttk.Frame(interior)
+    conteudo.pack(fill='both', expand=True)
+    return casca, conteudo, rotulo_titulo
+
+
 class ComboboxPesquisavel(ttk.Combobox):
     """Combobox que filtra a lista de valores conforme o usuário digita."""
 
@@ -575,8 +675,8 @@ class GrupoSubsidiario:
         # exceto Custo cessado, que tem um motivo por tipo (ver _motivo em gerador_pedido.py).
         nomes_teses = ordenar_nomes_teses(_chaves_teses_subsidiarias_compativeis())
 
-        self.frame = ttk.Labelframe(parent, text=f"Tese subsidiária {numero}", padding=12)
-        self.frame.pack(fill='x', expand=True, pady=(0, 8))
+        self._casca, self.frame, self._rotulo_titulo = _criar_cartao(parent, f"Tese subsidiária {numero}", padding=12)
+        self._casca.pack(fill='x', expand=True, pady=(0, 8))
 
         linha = ttk.Frame(self.frame)
         linha.pack(fill='x', anchor='w')
@@ -634,13 +734,13 @@ class GrupoSubsidiario:
             linha.aplicar_travamento(especie_travada)
 
     def _remover(self):
-        if not messagebox.askyesno(
+        if not _confirmar(
+            self.frame,
             'Remover tese subsidiária',
             'Tem certeza que deseja remover esta tese subsidiária? Os dados preenchidos serão perdidos.',
-            parent=self.frame.winfo_toplevel(),
         ):
             return
-        self.frame.destroy()
+        self._casca.destroy()
         self.on_remover(self)
 
     def obter_dados(self, quantidade_principal=None, especies_principal=None):
@@ -669,10 +769,11 @@ class GrupoSubsidiario:
         if numeros_com_especie:
             validar_beneficios_subsidiaria(numeros_com_especie, quantidade_principal)
 
-        # Nenhum benefício informado: se o pedido principal tiver mais de 1 benefício,
-        # entende-se que o subsidiário se aplica a todos eles (fica no plural, sem números
-        # avulsos). Com quantidade principal 1 (ou não informada) ainda é obrigatório
-        # informar o benefício.
+        # Nenhum benefício informado: se a quantidade do pedido principal for conhecida,
+        # entende-se que o subsidiário se aplica a todos os benefícios dele (singular com
+        # quantidade 1, plural com mais - ver montar_grupo_subsidiaria). Sem quantidade
+        # informada ainda é obrigatório informar o benefício, por não dar pra saber quantos
+        # existem.
         todos_beneficios_principal = False
         if not numeros_com_especie:
             if beneficio_subsidiario_pode_herdar_do_principal(quantidade_principal):
@@ -687,6 +788,7 @@ class GrupoSubsidiario:
             'parametro_valor': parametro_valor,
             'todos_beneficios_principal': todos_beneficios_principal,
             'especies_principal': especies_principal if todos_beneficios_principal else None,
+            'quantidade_principal': quantidade_principal if todos_beneficios_principal else None,
         }
 
 
@@ -695,8 +797,8 @@ class BlocoPedido:
         self.on_remover = on_remover
         nomes_teses = ordenar_nomes_teses()
 
-        self.frame = ttk.Labelframe(parent, text=f"Pedido {numero}", padding=14)
-        self.frame.pack(fill='x', expand=True, pady=(0, 14), padx=2)
+        self._casca, self.frame, self._rotulo_titulo = _criar_cartao(parent, f"Pedido {numero}")
+        self._casca.pack(fill='x', expand=True, pady=(0, 14), padx=2)
 
         # Espaço fixo entre a coluna de rótulos e a coluna de campos (~1cm), para não ficar
         # colado no rótulo mais curto. 'pad' soma espaço APÓS a coluna 0, empurrando a
@@ -717,14 +819,16 @@ class BlocoPedido:
             add='+',
         )
 
-        ttk.Label(self.frame, text="Quantidade de benefícios:").grid(row=1, column=0, sticky='w', pady=(8, 4))
+        self.label_quantidade = ttk.Label(self.frame, text="Quantidade de benefícios:")
+        self.label_quantidade.grid(row=1, column=0, sticky='w', pady=(8, 4))
         self.entry_quantidade = ttk.Entry(self.frame, width=10)
         self.entry_quantidade.grid(row=1, column=1, sticky='w', pady=(8, 4))
         self.entry_quantidade.bind('<KeyRelease>', lambda e: self._ao_mudar_quantidade())
         self._atualizar_estado_quantidade()
 
-        ttk.Label(self.frame, text="Espécie(s):").grid(row=2, column=0, sticky='w', pady=(8, 4))
-        frame_especies = ttk.Frame(self.frame)
+        self.label_especies = ttk.Label(self.frame, text="Espécie(s):")
+        self.label_especies.grid(row=2, column=0, sticky='w', pady=(8, 4))
+        self.frame_especies = frame_especies = ttk.Frame(self.frame)
         frame_especies.grid(row=2, column=1, sticky='w', pady=(8, 4))
         self.vars_especies = {especie: tk.BooleanVar(value=(i == 0)) for i, especie in enumerate(ESPECIES)}
         self.checks_especies = {}
@@ -785,29 +889,42 @@ class BlocoPedido:
             self.frame_parametro.grid(row=3, column=1, sticky='we', pady=(8, 4))
 
     def _atualizar_estado_especies(self):
-        """Desabilita (cinza, só visual) a escolha de espécie quando a tese selecionada não
-        depende da espécie do benefício (ex: Rotatividade, CAT não vinculada), ou restringe
-        às espécies permitidas por ela (ex: Convertido só aceita B31/B36) - desmarcando
-        qualquer espécie que tenha ficado marcada e não seja mais permitida."""
+        """Some a linha "Espécie(s)" inteira (rótulo + campo) quando a tese selecionada não
+        depende de espécie do benefício (ex: Rotatividade, CAT não vinculada) - em vez de
+        deixar cinza/desabilitada ocupando espaço à toa. Quando depende, some só a espécie
+        que não se aplica (ex: Convertido só aceita B31/B36) - desmarcando qualquer espécie
+        que tenha ficado marcada e não seja mais permitida."""
         tese = TESES.get(nome_para_chave(self.combo_tese.get()))
         ignora = bool(tese and tese.get('ignora_especie'))
-        permitidas = tese.get('especies_permitidas') if tese else None
-        for especie, check in self.checks_especies.items():
-            if ignora:
-                check.configure(state='disabled')
-                continue
-            if permitidas is not None and especie not in permitidas:
-                check.configure(state='disabled')
+        if ignora:
+            for especie in ESPECIES:
                 self.vars_especies[especie].set(False)
-            else:
-                check.configure(state='normal')
+            self.label_especies.grid_remove()
+            self.frame_especies.grid_remove()
+            return
+        self.label_especies.grid()
+        self.frame_especies.grid()
+        permitidas = tese.get('especies_permitidas') if tese else None
+        for especie in ESPECIES:
+            self.checks_especies[especie].pack_forget()
+        for especie in ESPECIES:
+            if permitidas is not None and especie not in permitidas:
+                self.vars_especies[especie].set(False)
+                continue
+            self.checks_especies[especie].pack(side='left', padx=(0, 10))
 
     def _atualizar_estado_quantidade(self):
-        """Desabilita (cinza, só visual) a quantidade quando a tese selecionada não depende
-        dela (ex: Prescrição quinquenal, Erro de massa salarial - só citam vigência)."""
+        """Some a linha "Quantidade de benefícios" inteira (rótulo + campo) quando a tese
+        selecionada não depende dela (ex: Prescrição quinquenal, Erro de massa salarial -
+        só citam vigência) - em vez de deixar cinza/desabilitada ocupando espaço à toa."""
         tese = TESES.get(nome_para_chave(self.combo_tese.get()))
         ignora = bool(tese and tese.get('ignora_quantidade'))
-        self.entry_quantidade.configure(state='disabled' if ignora else 'normal')
+        if ignora:
+            self.label_quantidade.grid_remove()
+            self.entry_quantidade.grid_remove()
+        else:
+            self.label_quantidade.grid()
+            self.entry_quantidade.grid()
 
     def _atualizar_estado_subsidiario(self):
         """Desabilita (e desmarca) o checkbox "Possui pedido subsidiário?" para teses que
@@ -822,7 +939,7 @@ class BlocoPedido:
             self.var_subsidiario.set(False)
             self.frame_subsidiario.grid_forget()
         for grupo in list(self.grupos_subsidiarios):
-            grupo.frame.destroy()
+            grupo._casca.destroy()
         self.grupos_subsidiarios = []
         self.check_subsidiario.configure(state='disabled')
 
@@ -838,10 +955,10 @@ class BlocoPedido:
         if limite_especies_excedido(quantidade, marcadas):
             self.vars_especies[especie_clicada].set(False)
             plural = '' if quantidade == 1 else 's'
-            messagebox.showwarning(
+            _avisar(
+                self.frame,
                 'Aviso',
                 f'Com quantidade {quantidade}, selecione no máximo {quantidade} espécie{plural} de benefício.',
-                parent=self.frame.winfo_toplevel(),
             )
         self._atualizar_travamento_subsidiarias()
 
@@ -884,16 +1001,16 @@ class BlocoPedido:
         if grupo in self.grupos_subsidiarios:
             self.grupos_subsidiarios.remove(grupo)
         for i, g in enumerate(self.grupos_subsidiarios, start=1):
-            g.frame.configure(text=f"Tese subsidiária {i}")
+            g._rotulo_titulo.configure(text=f"Tese subsidiária {i}")
 
     def _remover(self):
-        if not messagebox.askyesno(
+        if not _confirmar(
+            self.frame,
             'Remover pedido',
             'Tem certeza que deseja remover este pedido? Os dados preenchidos serão perdidos.',
-            parent=self.frame.winfo_toplevel(),
         ):
             return
-        self.frame.destroy()
+        self._casca.destroy()
         self.on_remover(self)
 
     def obter_dados(self):
@@ -992,7 +1109,7 @@ class Janela:
         for pagina in (self._pagina_pedidos, self._pagina_historico, self._pagina_ordem):
             pagina.grid(row=0, column=0, sticky='nsew')
 
-        botoes = ttk.Frame(self._pagina_pedidos, padding=(28, 12, 28, 16))
+        botoes = ttk.Frame(self._pagina_pedidos, padding=(28, 12, 28, 16), style="Pagina.TFrame")
         botoes.pack(fill='x', side='bottom')
         ttk.Separator(self._pagina_pedidos).pack(fill='x', side='bottom')
         ttk.Button(botoes, text="+ Adicionar pedido", command=self.adicionar_pedido, bootstyle='primary-outline').pack(side='left')
@@ -1003,10 +1120,10 @@ class Janela:
         ttk.Button(self._botoes_resultado, text="Abrir documento", command=self._abrir_ultimo_documento, bootstyle='light').pack(side='left', padx=(0, 8))
         ttk.Button(self._botoes_resultado, text="Abrir pasta", command=self._abrir_pasta_ultimo_documento, bootstyle='light').pack(side='left', padx=(0, 12))
 
-        container = ttk.Frame(self._pagina_pedidos, padding=(28, 24, 20, 12))
+        container = ttk.Frame(self._pagina_pedidos, padding=(28, 24, 20, 12), style="Pagina.TFrame")
         container.pack(fill='both', expand=True)
 
-        cabecalho = ttk.Frame(container)
+        cabecalho = ttk.Frame(container, style="Pagina.TFrame")
         cabecalho.pack(fill='x', pady=(0, 16))
         ttk.Label(cabecalho, text="Pedidos", style="Titulo.TLabel").pack(anchor='w')
         ttk.Label(
@@ -1014,7 +1131,7 @@ class Janela:
             style="Descricao.TLabel",
         ).pack(anchor='w', pady=(2, 0))
 
-        self.canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0, background=tema.COR_FUNDO)
+        self.canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0, background=tema.COR_FUNDO_SUAVE)
 
         def _ao_mover_scrollbar(*args):
             self.canvas.yview(*args)
@@ -1024,7 +1141,7 @@ class Janela:
             self._atualizar_scrollregion()
 
         scrollbar = ttk.Scrollbar(container, orient='vertical', command=_ao_mover_scrollbar)
-        self.frame_interno = ttk.Frame(self.canvas)
+        self.frame_interno = ttk.Frame(self.canvas, style="Pagina.TFrame")
         self._id_frame_interno = self.canvas.create_window((0, 0), window=self.frame_interno, anchor='nw')
         # canvas.bbox('all') (bbox do item-janela) demorava a refletir a altura real do
         # conteúdo depois de itemconfigure(width=...), deixando o scrollregion maior que o
@@ -1152,6 +1269,39 @@ class Janela:
             acento.configure(style="Acento.TFrame" if ativo else "Sidebar.TFrame")
             botao.configure(style="NavAtivo.TButton" if ativo else "Nav.TButton")
 
+    def _mostrar_toast(self, mensagem, cor_fundo=None):
+        """Aviso temporário que aparece sozinho e some sozinho (sem precisar clicar em
+        "Fechar"/"OK") - usado depois de ações que voltam pra outra página na hora (ex:
+        Salvar em Ordem), onde um messagebox tradicional pediria um clique extra só pra
+        confirmar algo que já deu certo. Janela solta (sem barra de título, overrideredirect),
+        não um widget dentro da página - assim funciona em cima de qualquer página, sem
+        precisar existir dentro da árvore de widgets de quem chamou."""
+        cor_fundo = cor_fundo or tema.COR_SUCESSO
+        toast = tk.Toplevel(self.root)
+        toast.overrideredirect(True)
+        try:
+            toast.attributes('-topmost', True)
+        except Exception:
+            pass
+        toast.configure(background=cor_fundo)
+        tk.Label(
+            toast, text=mensagem, background=cor_fundo, foreground='#FFFFFF',
+            font=('Segoe UI', 10, 'bold'), padx=22, pady=12,
+        ).pack()
+        toast.update_idletasks()
+        largura, altura = toast.winfo_reqwidth(), toast.winfo_reqheight()
+        # Centralizado verticalmente no meio da janela inteira (mesmo eixo em que o
+        # messagebox padrão, ex: o "Aviso" de validação, sempre aparece, pra ficar
+        # previsível - não perto do topo, sobrepondo o cabeçalho da página). Horizontalmente,
+        # centralizado só na área de CONTEÚDO (excluindo a sidebar): centralizar na janela
+        # inteira jogava o toast visualmente pra esquerda, "puxado" pela sidebar, que não tem
+        # contraparte à direita.
+        largura_conteudo = self.root.winfo_width() - LARGURA_SIDEBAR
+        x = self.root.winfo_rootx() + LARGURA_SIDEBAR + max(0, (largura_conteudo - largura) // 2)
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - altura) // 2
+        toast.geometry(f'{largura}x{altura}+{x}+{y}')
+        toast.after(1300, toast.destroy)
+
     def _corrigir_posicao_inicial(self):
         self.root.update_idletasks()
         self._atualizar_scrollregion()
@@ -1213,18 +1363,19 @@ class Janela:
         if bloco in self.blocos:
             self.blocos.remove(bloco)
         for i, b in enumerate(self.blocos, start=1):
-            b.frame.configure(text=f"Pedido {i}")
+            b._rotulo_titulo.configure(text=f"Pedido {i}")
 
     # ── Limpar tudo ───────────────────────────────────────────────────────────
 
     def _limpar_tudo(self):
-        if not messagebox.askyesno(
+        if not _confirmar(
+            self.root,
             'Limpar tudo',
             'Tem certeza que deseja limpar todos os pedidos preenchidos?',
         ):
             return
         for bloco in list(self.blocos):
-            bloco.frame.destroy()
+            bloco._casca.destroy()
         self.blocos.clear()
         self.adicionar_pedido()
 
@@ -1232,13 +1383,13 @@ class Janela:
 
     def _abrir_pasta_ultimo_documento(self):
         if not self._ultimo_documento or not os.path.isfile(self._ultimo_documento):
-            messagebox.showwarning('Aviso', 'Nenhum documento foi salvo ainda nesta sessão.')
+            _avisar(self.root, 'Aviso', 'Nenhum documento foi salvo ainda nesta sessão.')
             return
         os.startfile(os.path.dirname(self._ultimo_documento))
 
     def _abrir_ultimo_documento(self):
         if not self._ultimo_documento or not os.path.isfile(self._ultimo_documento):
-            messagebox.showwarning('Aviso', 'Nenhum documento foi salvo ainda nesta sessão.')
+            _avisar(self.root, 'Aviso', 'Nenhum documento foi salvo ainda nesta sessão.')
             return
         os.startfile(self._ultimo_documento)
 
@@ -1281,10 +1432,10 @@ class Janela:
             filho.destroy()
         chaves_estado = ordenar_chaves_teses()
 
-        container = ttk.Frame(self._pagina_ordem, padding=(28, 24, 20, 12))
+        container = ttk.Frame(self._pagina_ordem, padding=(28, 24, 20, 12), style="Pagina.TFrame")
         container.pack(fill='both', expand=True)
 
-        cabecalho = ttk.Frame(container)
+        cabecalho = ttk.Frame(container, style="Pagina.TFrame")
         cabecalho.pack(fill='x', pady=(0, 16))
         ttk.Label(cabecalho, text="Ordem", style="Titulo.TLabel").pack(anchor='w')
         ttk.Label(
@@ -1295,8 +1446,8 @@ class Janela:
         # Card com borda (igual ao "Pedido 1" da página Pedidos) em volta da lista - sem
         # isso a lista era um Listbox branco solto direto no fundo branco da página, sem
         # nenhum contorno que desse "chão" pro conteúdo (ficava com cara de flutuando).
-        cartao = ttk.Labelframe(container, text='Teses cadastradas', padding=14)
-        cartao.pack(fill='both', expand=True)
+        cartao_casca, cartao, _ = _criar_cartao(container, 'Teses cadastradas', expandir=True)
+        cartao_casca.pack(fill='both', expand=True)
 
         frame_lista = ttk.Frame(cartao)
         frame_lista.pack(fill='both', expand=True)
@@ -1340,6 +1491,7 @@ class Janela:
             salvar_ordem_teses(chaves_estado)
             self._atualizar_ordem_teses_em_todos_combos()
             self._mostrar_pagina('pedidos')
+            self._mostrar_toast('✓ Ordem salva com sucesso')
 
         botoes_mover = ttk.Frame(cartao, padding=(0, 10, 0, 0))
         botoes_mover.pack(fill='x')
@@ -1351,7 +1503,7 @@ class Janela:
         )
 
         ttk.Separator(container).pack(fill='x', pady=(12, 0))
-        botoes = ttk.Frame(container, padding=(0, 10, 0, 0))
+        botoes = ttk.Frame(container, padding=(0, 10, 0, 0), style="Pagina.TFrame")
         botoes.pack(fill='x')
         ttk.Button(botoes, text='Restaurar padrão', command=restaurar_padrao, bootstyle='secondary-outline').pack(
             side='left',
@@ -1531,10 +1683,10 @@ class Janela:
             filho.destroy()
         historico = self._ler_historico()
 
-        container = ttk.Frame(self._pagina_historico, padding=(28, 24, 20, 12))
+        container = ttk.Frame(self._pagina_historico, padding=(28, 24, 20, 12), style="Pagina.TFrame")
         container.pack(fill='both', expand=True)
 
-        cabecalho = ttk.Frame(container)
+        cabecalho = ttk.Frame(container, style="Pagina.TFrame")
         cabecalho.pack(fill='x', pady=(0, 16))
         ttk.Label(cabecalho, text="Histórico", style="Titulo.TLabel").pack(anchor='w')
         ttk.Label(
@@ -1544,8 +1696,8 @@ class Janela:
 
         # Card com borda (igual ao "Pedido 1" da página Pedidos) em volta da lista - ver o
         # mesmo comentário em _construir_pagina_ordem.
-        cartao = ttk.Labelframe(container, text='Documentos gerados', padding=14)
-        cartao.pack(fill='both', expand=True)
+        cartao_casca, cartao, _ = _criar_cartao(container, 'Documentos gerados', expandir=True)
+        cartao_casca.pack(fill='both', expand=True)
 
         frame_lista = ttk.Frame(cartao)
         frame_lista.pack(fill='both', expand=True)
@@ -1583,16 +1735,16 @@ class Janela:
             if os.path.isfile(caminho):
                 os.startfile(caminho)
             else:
-                messagebox.showwarning('Arquivo não encontrado', f'O arquivo não existe mais:\n{caminho}', parent=self.root)
+                _avisar(self.root, 'Arquivo não encontrado', f'O arquivo não existe mais:\n{caminho}')
 
         tree.bind('<Double-1>', abrir_selecionado)
 
         def limpar_historico():
-            if not messagebox.askyesno(
+            if not _confirmar(
+                self.root,
                 'Limpar histórico',
                 'Tem certeza que deseja limpar todo o histórico de documentos gerados?\n'
                 '(Os arquivos .docx já salvos não são apagados, só a lista de histórico.)',
-                parent=self.root,
             ):
                 return
             try:
@@ -1605,7 +1757,7 @@ class Janela:
             tree.insert('', 'end', values=('—', 'Nenhum documento gerado ainda.'))
 
         ttk.Separator(container).pack(fill='x', pady=(8, 0))
-        botoes = ttk.Frame(container, padding=(0, 10, 0, 0))
+        botoes = ttk.Frame(container, padding=(0, 10, 0, 0), style="Pagina.TFrame")
         botoes.pack(fill='x')
         ttk.Button(botoes, text='Limpar histórico', command=limpar_historico, bootstyle='danger-outline').pack(
             side='left',
@@ -1616,7 +1768,7 @@ class Janela:
 
     def gerar(self):
         if not self.blocos:
-            messagebox.showwarning('Aviso', 'Adicione ao menos um pedido.')
+            _avisar(self.root, 'Aviso', 'Adicione ao menos um pedido.')
             return
 
         pedidos = []
@@ -1624,19 +1776,19 @@ class Janela:
             try:
                 pedidos.append(bloco.obter_dados())
             except ValueError as exc:
-                messagebox.showwarning('Aviso', f'Pedido {i}: {exc}')
+                _avisar(self.root, 'Aviso', f'Pedido {i}: {exc}')
                 return
 
         try:
             validar_itens_duplicados([pedido['item_peticao'] for pedido in pedidos])
         except ValueError as exc:
-            messagebox.showwarning('Aviso', str(exc))
+            _avisar(self.root, 'Aviso', str(exc))
             return
 
         try:
             doc = gerar_documento(pedidos)
         except Exception as exc:
-            messagebox.showerror('Erro ao gerar', str(exc))
+            _erro(self.root, 'Erro ao gerar', str(exc))
             return
 
         def _salvar():
@@ -1651,6 +1803,6 @@ class Janela:
             self._ultimo_documento = caminho
             self._botoes_resultado.pack(side='right')
             self._registrar_historico(caminho)
-            messagebox.showinfo('Sucesso', f'Documento gerado em:\n{caminho}')
+            _informar(self.root, 'Sucesso', f'Documento gerado em:\n{caminho}')
 
         _mostrar_preview(self.root, doc, _salvar)

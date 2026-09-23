@@ -30,6 +30,7 @@ def grupo_subsidiario(**overrides):
         'parametro_valor': None,
         'todos_beneficios_principal': False,
         'especies_principal': None,
+        'quantidade_principal': None,
     }
     dados.update(overrides)
     return dados
@@ -239,6 +240,19 @@ class TestTeseSubsidiaria:
             'petição inicial. Subsidiariamente, não sendo esse o entendimento de V. Exa., requer-se a '
             'exclusão dos benefícios B91, decorrentes de acidentes de trajeto – item 3.1 da petição inicial.'
         )
+
+    def test_heranca_do_beneficio_do_principal_com_quantidade_1_fica_no_singular(self):
+        # Com quantidade principal 1, só existe um benefício possível - não faz sentido
+        # exigir que o número dele seja repetido na tese subsidiária, nem falar no plural.
+        pedido = pedido_base(
+            quantidade=1, especies=['B91'], tese_key='acidente_sem_relacao_empresa', item_peticao='2',
+            grupos_subsidiarios=[grupo_subsidiario(
+                tese_subsidiaria_key='acidente_trajeto', item_peticao='3.1',
+                todos_beneficios_principal=True, especies_principal=['B91'], quantidade_principal=1,
+            )],
+        )
+        t = texto(pedido)
+        assert 'requer-se a exclusão do benefício B91, decorrente de acidente de trajeto' in t
 
     def test_multiplos_grupos_encadeados_com_separador(self):
         pedido = pedido_base(grupos_subsidiarios=[

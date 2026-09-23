@@ -73,10 +73,11 @@ def especie_unica_travada(especies_marcadas, especies_validas_subsidiaria):
 
 
 def beneficio_subsidiario_pode_herdar_do_principal(quantidade_principal):
-    """Uma tese subsidiária sem benefícios próprios informados só pode herdar "todos os
-    benefícios do pedido principal" quando a quantidade principal for maior que 1 (com
-    quantidade 1 o benefício já é o próprio, então precisa ser informado)."""
-    return bool(quantidade_principal and quantidade_principal > 1)
+    """Uma tese subsidiária sem benefícios próprios informados herda "todos os benefícios
+    do pedido principal" sempre que a quantidade principal for conhecida - inclusive com
+    quantidade 1: nesse caso só existe um benefício possível, então não há por que exigir
+    que o número dele seja repetido."""
+    return bool(quantidade_principal and quantidade_principal >= 1)
 
 
 def validar_beneficios_subsidiaria(numeros_com_especie, quantidade_principal):

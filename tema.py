@@ -60,16 +60,27 @@ def aplicar(root) -> "ttkbootstrap.Style":
     estilo.configure("TButton", padding=(14, 8))
     estilo.configure("TEntry", padding=(8, 6))
 
-    # cards: borda fina e neutra, título em azul-marinho
+    # Cards NÃO usam mais ttk.Labelframe nativo (ver _criar_cartao em interface.py) - o
+    # Labelframe tem um bug de renderização real (reproduzido isolado, fora deste app, com
+    # qualquer tema ttkbootstrap): o traço da borda antes do texto do título simplesmente
+    # não desenha. Inofensivo em branco-sobre-branco (o padrão de antes), mas visível assim
+    # que a página ganhou um fundo cinza ao redor dos cards (ver Pagina.TFrame). O título
+    # do card volta a ficar DENTRO do quadrado branco (fundo COR_FUNDO, não COR_FUNDO_SUAVE),
+    # encostado na borda superior - só que como um Label de verdade, não embutido na borda
+    # do jeito que o Labelframe fazia (a borda em si é montada com Frames simples).
     estilo.configure(
-        "TLabelframe", bordercolor=COR_BORDA, lightcolor=COR_BORDA, darkcolor=COR_BORDA,
-        borderwidth=1, relief="solid",
+        "TituloCartaoInterno.TLabel", foreground=COR_PRIMARIA, background=COR_FUNDO,
+        font=("Segoe UI", 11, "bold"),
     )
-    estilo.configure("TLabelframe.Label", foreground=COR_PRIMARIA, font=("Segoe UI", 11, "bold"))
     estilo.configure("Ajuda.TLabel", foreground=COR_AJUDA, font=("Segoe UI", 9))
     estilo.configure("Aviso.TLabel", foreground=COR_AVISO, font=("Segoe UI", 9))
-    estilo.configure("Titulo.TLabel", foreground=COR_PRIMARIA, font=("Segoe UI", 16, "bold"))
-    estilo.configure("Descricao.TLabel", foreground=COR_AJUDA, font=("Segoe UI", 10))
+    estilo.configure("Titulo.TLabel", foreground=COR_PRIMARIA, background=COR_FUNDO_SUAVE, font=("Segoe UI", 16, "bold"))
+    estilo.configure("Descricao.TLabel", foreground=COR_AJUDA, background=COR_FUNDO_SUAVE, font=("Segoe UI", 10))
+    # Fundo cinza-clarinho por trás dos cards nas páginas (Pedido/Ordem/Histórico) - só
+    # branco (COR_FUNDO) tanto na página quanto no card deixava os dois "mesclados", sem
+    # nada delimitando onde um card começa e a página termina. O card em si continua branco
+    # (TLabelframe não é tocado aqui) - só o que fica AO REDOR do card muda de cor.
+    estilo.configure("Pagina.TFrame", background=COR_FUNDO_SUAVE)
 
     # barra lateral
     estilo.configure("Sidebar.TFrame", background=COR_PRIMARIA)

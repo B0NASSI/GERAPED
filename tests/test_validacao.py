@@ -99,8 +99,8 @@ class TestHerancaBeneficioSubsidiario:
     def test_pode_herdar_com_quantidade_maior_que_1(self):
         assert beneficio_subsidiario_pode_herdar_do_principal(2) is True
 
-    def test_nao_pode_herdar_com_quantidade_1(self):
-        assert beneficio_subsidiario_pode_herdar_do_principal(1) is False
+    def test_pode_herdar_com_quantidade_1(self):
+        assert beneficio_subsidiario_pode_herdar_do_principal(1) is True
 
     def test_nao_pode_herdar_sem_quantidade(self):
         assert beneficio_subsidiario_pode_herdar_do_principal(None) is False
