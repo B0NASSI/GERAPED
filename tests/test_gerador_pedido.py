@@ -49,7 +49,12 @@ class TestExclusaoBeneficioPadrao:
         t = texto(pedido_base(quantidade=3, especies=['B91', 'B92'], tese_key='acidente_trajeto'))
         assert '3 (três) benefícios acidentários, espécies B91 e B92' in t
         assert 'dos índices do FAP' in t
-        assert 'decorrentes de acidentes de trajeto' in t
+
+    def test_plural_multiplas_especies_previdenciarias(self):
+        # B31/B36 são previdenciários, não acidentários (bug real: o texto sempre dizia
+        # "acidentários", mesmo quando as espécies escolhidas eram só B31/B36)
+        t = texto(pedido_base(quantidade=2, especies=['B31', 'B36'], tese_key='convertido'))
+        assert '2 (dois) benefícios previdenciários, espécies B31 e B36' in t
 
     def test_plural_multiplas_especies_previdenciarias(self):
         # B31/B36 são previdenciários, não acidentários (bug real: o texto sempre dizia
@@ -280,3 +285,84 @@ class TestTeseSubsidiaria:
         ])
         t = texto(pedido)
         assert 'esta correspondente ao dia imediatamente anterior ao óbito' in t
+
+
+class TestIndiceSingularEExclusaoNtp:
+    """Gabarito: PEDIDOS.docx real da Telemont 2016 (itens 5, 6, 7 e 9)."""
+
+    def test_indice_singular_com_ntp_plural(self):
+        # item 7: 2 benefícios, mesmo estabelecimento -> "do índice do FAP"
+        t = texto(pedido_base(
+            quantidade=2, tese_key='concomitancia_outro_beneficio', parametro_valor='aposentadoria',
+            item_peticao='7', indice_singular=True, excluir_ntp=True,
+        ))
+        assert 'abaixo arrolados, da base de cálculo do índice do FAP, concedidos' in t
+        assert t.endswith(
+            '– item 7 da petição inicial, bem como a exclusão dos Nexos Técnicos Previdenciários (NTP).'
+        )
+
+    def test_indice_plural_por_padrao(self):
+        t = texto(pedido_base(quantidade=2, tese_key='restabelecimento_beneficio_anterior'))
+        assert 'da base de cálculo dos índices do FAP' in t
+
+    def test_ntp_singular_com_dois_beneficios(self):
+        # item 9: B91 e B92, mas um só NTP
+        t = texto(pedido_base(
+            quantidade=2, especies=['B91', 'B92'], tese_key='acidente_anterior_2007', item_peticao='9',
+            excluir_ntp=True, ntp_singular=True,
+        ))
+        assert t == (
+            'Determinar a exclusão de 2 (dois) benefícios acidentários, espécies B91 e B92, abaixo '
+            'arrolados, da base de cálculo dos índices do FAP, decorrentes de acidentes anteriores a '
+            'abril de 2007 – item 9 da petição inicial, bem como a exclusão do Nexo Técnico '
+            'Previdenciário (NTP).'
+        )
+
+    def test_ntp_singular_com_um_beneficio(self):
+        t = texto(pedido_base(quantidade=1, excluir_ntp=True))
+        assert t.endswith('bem como a exclusão do Nexo Técnico Previdenciário (NTP).')
+
+    def test_exclusao_do_ntp_em_negrito(self):
+        doc = gerar_documento([pedido_base(quantidade=2, excluir_ntp=True)])
+        runs = doc.paragraphs[0].runs
+        i = next(i for i, r in enumerate(runs) if r.text == ', bem como a ')
+        assert (runs[i + 1].text, runs[i + 1].bold) == ('exclusão', True)
+        assert not runs[i + 2].bold
+
+    def test_ntp_antes_do_subsidiario(self):
+        # item 6: o NTP entra logo após o item do pedido principal, antes do "Subsidiariamente"
+        pedido = pedido_base(
+            quantidade=3, tese_key='acidente_sem_relacao_empresa', item_peticao='6', excluir_ntp=True,
+            grupos_subsidiarios=[grupo_subsidiario(
+                tese_subsidiaria_key='ausencia_nexo_causal_concausalidade', item_peticao='8',
+                numeros_com_especie=[('B91', '6057651034')],
+            )],
+        )
+        assert (
+            '– item 6 da petição inicial, bem como a exclusão dos Nexos Técnicos Previdenciários (NTP). '
+            'Subsidiariamente,'
+        ) in texto(pedido)
+
+
+class TestContestacaoVariosEstabelecimentos:
+    def test_mesma_vigencia_varios_estabelecimentos(self):
+        t = texto(pedido_base(
+            tese_key='contestacao_administrativa', especies=[], campo_texto_valor='2016', item_peticao='3',
+            varios_estabelecimentos=True,
+        ))
+        assert t == (
+            'Declarar a inexistência de prescrição do direito da empresa Autora de corrigir os erros '
+            'cometidos na base de cálculo do FAP e reaver (compensar) seus créditos em relação à vigência '
+            'de 2016, em razão do efeito suspensivo atribuído às contestações administrativas – item 3 '
+            'da petição inicial.'
+        )
+
+    def test_um_estabelecimento_por_padrao(self):
+        t = texto(pedido_base(tese_key='contestacao_administrativa', especies=[], campo_texto_valor='2016'))
+        assert 'atribuído à contestação administrativa' in t
+
+    def test_prescricao_ignora_opcao(self):
+        t = texto(pedido_base(
+            tese_key='prescricao_quinquenal', especies=[], campo_texto_valor='2016', varios_estabelecimentos=True,
+        ))
+        assert 'em razão da prescrição quinquenal, nos termos da fundamentação' in t

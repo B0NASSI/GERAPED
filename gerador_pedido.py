@@ -112,7 +112,10 @@ def _descricao_item(tese, especies, singular):
     return _descricao_beneficios(especies, singular)
 
 
-def montar_clausula_principal(paragrafo, quantidade, especies, tese_key, item_peticao, parametro_valor=None):
+def montar_clausula_principal(
+    paragrafo, quantidade, especies, tese_key, item_peticao, parametro_valor=None,
+    indice_singular=False, excluir_ntp=False, ntp_singular=False,
+):
     tese = TESES[tese_key]
     singular = quantidade == 1
     # Teses cujo substantivo excluído é gramaticalmente feminino (ex: Comunicação de
@@ -145,12 +148,19 @@ def montar_clausula_principal(paragrafo, quantidade, especies, tese_key, item_pe
     # no singular independente da quantidade.
     base_calculo = tese.get('base_calculo')
     if base_calculo is None:
-        indice = 'do índice do FAP' if singular else 'dos índices do FAP'
+        indice = 'do índice do FAP' if singular or indice_singular else 'dos índices do FAP'
         base_calculo = f'da base de cálculo {indice}'
     _add_run(paragrafo, f', {arrolado}, {base_calculo}, ')
     _add_run(paragrafo, _motivo(tese, singular, parametro_valor), bold=True)
 
     _add_item_referencia(paragrafo, item_peticao)
+
+    if excluir_ntp:
+        # Singular/plural do NTP é escolha do caso, não da quantidade: 2 benefícios podem ter um só NTP.
+        ntp = 'do Nexo Técnico Previdenciário (NTP)' if singular or ntp_singular else 'dos Nexos Técnicos Previdenciários (NTP)'
+        _add_run(paragrafo, ', bem como a ')
+        _add_run(paragrafo, 'exclusão', bold=True)
+        _add_run(paragrafo, f' {ntp}')
 
 
 # Frases específicas de cada tipo de custo cessado - a redação muda de estrutura
@@ -210,8 +220,12 @@ def _vigencia_no_plural(vigencia):
     return len(partes) > 1
 
 
-def montar_clausula_fixo_com_vigencia(paragrafo, tese, item_peticao, vigencia):
+def montar_clausula_fixo_com_vigencia(paragrafo, tese, item_peticao, vigencia, varios_estabelecimentos=False):
     plural = _vigencia_no_plural(vigencia)
+    if varios_estabelecimentos and 'motivo_fixo_varios_estabelecimentos' in tese:
+        motivo = tese['motivo_fixo_varios_estabelecimentos']
+    else:
+        motivo = tese['motivo_fixo']
     preposicao = 'às vigências de' if plural else 'à vigência de'
 
     _add_run(paragrafo, 'Declarar a ')
@@ -222,7 +236,7 @@ def montar_clausula_fixo_com_vigencia(paragrafo, tese, item_peticao, vigencia):
         f'cálculo do FAP e reaver (compensar) seus créditos em relação {preposicao} ',
     )
     _add_run(paragrafo, vigencia or 'xxxx')
-    _add_run(paragrafo, f", {tese['motivo_fixo']}")
+    _add_run(paragrafo, f', {motivo}')
 
     _add_item_referencia(paragrafo, item_peticao)
 
@@ -242,6 +256,7 @@ def montar_clausula(paragrafo, pedido):
     if tipo == 'fixo_com_vigencia':
         montar_clausula_fixo_com_vigencia(
             paragrafo, tese, pedido['item_peticao'], pedido.get('campo_texto_valor'),
+            varios_estabelecimentos=pedido.get('varios_estabelecimentos', False),
         )
         return
 
@@ -261,6 +276,9 @@ def montar_clausula(paragrafo, pedido):
     montar_clausula_principal(
         paragrafo, pedido['quantidade'], pedido['especies'], pedido['tese_key'], pedido['item_peticao'],
         parametro_valor=pedido.get('parametro_valor'),
+        indice_singular=pedido.get('indice_singular', False),
+        excluir_ntp=pedido.get('excluir_ntp', False),
+        ntp_singular=pedido.get('ntp_singular', False),
     )
 
 

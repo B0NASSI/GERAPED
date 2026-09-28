@@ -237,6 +237,8 @@ TESES = {
         'nome': 'CONTESTAÇÃO ADMINISTRATIVA',
         'tipo_clausula': 'fixo_com_vigencia',
         'motivo_fixo': 'em razão do efeito suspensivo atribuído à contestação administrativa',
+        # mesma vigência, 2+ estabelecimentos (CNPJs): uma contestação por estabelecimento
+        'motivo_fixo_varios_estabelecimentos': 'em razão do efeito suspensivo atribuído às contestações administrativas',
         'campo_texto': {
             'label': 'Vigência:',
         },

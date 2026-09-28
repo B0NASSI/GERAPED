@@ -4,6 +4,8 @@
 # gerar o documento (garantia, para o caso de o estado da UI escapar das restrições
 # interativas - ex: registro restaurado, ordem de eventos inesperada etc.).
 
+import re
+
 from teses import TESES
 
 
@@ -61,6 +63,31 @@ def tese_permite_subsidiario(tese_key):
     """Algumas teses não admitem benefício subsidiário (pedido do escritório - ex:
     Rotatividade, CAT não vinculada: o texto delas não comporta essa estrutura)."""
     return bool(TESES[tese_key].get('permite_subsidiario', True))
+
+
+def tese_permite_indice_singular(tese_key):
+    """Com 2+ benefícios do mesmo estabelecimento e vigência, o índice do FAP é um só -
+    o texto pode manter "do índice do FAP" no singular. Só vale para teses que seguem a
+    regra padrão singular/plural (sem 'base_calculo' fixo nem cláusula própria)."""
+    tese = TESES[tese_key]
+    return 'tipo_clausula' not in tese and 'base_calculo' not in tese
+
+
+TESE_QUE_LIBERA_NTP = 'contestacao_administrativa'
+ULTIMA_VIGENCIA_COM_NTP = 2017
+
+
+def vigencia_libera_ntp(texto_vigencia):
+    """True se o texto livre de vigência (ex: "2016", "2015, 2016") citar algum ano até 2017."""
+    anos = [int(a) for a in re.findall(r'\b(?:19|20)\d{2}\b', texto_vigencia or '')]
+    return any(ano <= ULTIMA_VIGENCIA_COM_NTP for ano in anos)
+
+
+def tese_permite_exclusao_ntp(tese_key):
+    """Vigências até 2017: o pedido pode incluir também a exclusão dos NTP. Não se aplica
+    a teses cujo objeto já é o NTP/CAT ('substantivo_singular') nem às de cláusula própria."""
+    tese = TESES[tese_key]
+    return 'tipo_clausula' not in tese and 'substantivo_singular' not in tese
 
 
 def especie_unica_travada(especies_marcadas, especies_validas_subsidiaria):

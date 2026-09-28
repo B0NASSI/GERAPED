@@ -1,13 +1,15 @@
 import json
+import math
 import os
 import re
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk
+from ttkbootstrap.style import Colors
 
 import tema
 from teses import TESES, TIPO_BENEFICIO_POR_ESPECIE, nome_para_chave, PARAMETROS_TESE, chave_para_opcao_parametro
@@ -16,6 +18,7 @@ from validacao import (
     validar_quantidade, validar_especies, limite_especies_excedido, limitar_especies,
     validar_itens_duplicados, especie_unica_travada, beneficio_subsidiario_pode_herdar_do_principal,
     validar_beneficios_subsidiaria, tese_permite_subsidiario,
+    tese_permite_indice_singular, tese_permite_exclusao_ntp, TESE_QUE_LIBERA_NTP, vigencia_libera_ntp,
 )
 from preferencias import ordenar_chaves_teses, ordenar_nomes_teses, salvar_ordem_teses, ordem_padrao_chaves
 
@@ -33,70 +36,88 @@ def _chaves_teses_subsidiarias_compativeis():
 LARGURA_SIDEBAR = 232
 
 
-def _dialogo(widget, titulo, mensagem, icone, cor_icone, botoes):
-    """Diálogo modal customizado (ícone + mensagem + botão(ões)) - substitui o messagebox
-    nativo do Tk. O nativo, no Windows, sempre centraliza sobre a janela raiz de verdade
-    (winfo_toplevel), ignorando qualquer "parent" auxiliar que a gente crie pra tentar
-    deslocar a posição - não dava pra colocar o "Aviso" no lugar pedido usando ele. Aqui a
-    posição é 100% nossa: mesma fórmula do toast de sucesso (ver Janela._mostrar_toast),
-    que já está no lugar certo."""
-    raiz = widget.winfo_toplevel()
-    dialogo = tk.Toplevel(raiz)
-    dialogo.title(titulo)
-    dialogo.resizable(False, False)
-    dialogo.transient(raiz)
-    dialogo.configure(background=tema.COR_FUNDO)
+def _retangulo_janela(janela):
+    """(esquerda, topo, direita, baixo) da janela inteira na tela, com barra de título e bordas."""
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL('user32')
+        user32.GetAncestor.restype = wintypes.HWND
+        retangulo = wintypes.RECT()
+        user32.GetWindowRect(user32.GetAncestor(janela.winfo_id(), 2), ctypes.byref(retangulo))
+        return retangulo.left, retangulo.top, retangulo.right, retangulo.bottom
+    x, y = janela.winfo_rootx(), janela.winfo_rooty()
+    return x, y, x + janela.winfo_width(), y + janela.winfo_height()
 
-    corpo = ttk.Frame(dialogo, padding=(24, 20))
-    corpo.pack(fill='both', expand=True)
-    linha = ttk.Frame(corpo)
-    linha.pack(fill='x')
-    ttk.Label(linha, text=icone, font=('Segoe UI', 18), foreground=cor_icone).pack(side='left', padx=(0, 16))
-    ttk.Label(linha, text=mensagem, font=('Segoe UI', 10), wraplength=300, justify='left').pack(
-        side='left', fill='x', expand=True,
-    )
 
-    resultado = {'valor': None}
+def _abrir_aviso_no_centro(janela, abrir):
+    """Abre um aviso padrão do Windows (messagebox) exatamente no centro da janela inteira
+    do app. Sozinho, o Windows o coloca deslocado para a direita/baixo; aqui um gancho CBT,
+    ativo só durante esta chamada, reposiciona a caixa ao ser ativada (antes de aparecer)."""
+    if sys.platform != 'win32':
+        return abrir()
+    import ctypes
+    from ctypes import wintypes
 
-    def escolher(valor):
-        resultado['valor'] = valor
-        dialogo.destroy()
+    user32 = ctypes.WinDLL('user32')
+    proc_tipo = ctypes.WINFUNCTYPE(wintypes.LPARAM, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+    user32.SetWindowsHookExW.argtypes = (ctypes.c_int, proc_tipo, wintypes.HINSTANCE, wintypes.DWORD)
+    user32.SetWindowsHookExW.restype = ctypes.c_void_p
+    user32.CallNextHookEx.argtypes = (ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+    user32.CallNextHookEx.restype = wintypes.LPARAM
+    user32.UnhookWindowsHookEx.argtypes = (ctypes.c_void_p,)
+    user32.GetAncestor.restype = wintypes.HWND
+    WH_CBT, HCBT_ACTIVATE, GA_ROOT = 5, 5, 2
+    SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x1, 0x4, 0x10
 
-    dialogo.protocol('WM_DELETE_WINDOW', lambda: escolher(None))
+    janela_app = user32.GetAncestor(janela.winfo_id(), GA_ROOT)
+    posicionado = []
 
-    rodape = ttk.Frame(corpo)
-    rodape.pack(fill='x', pady=(20, 0))
-    for i, texto in enumerate(botoes):
-        estilo = 'primary' if i == len(botoes) - 1 else 'secondary-outline'
-        ttk.Button(
-            rodape, text=texto, command=lambda v=texto: escolher(v), bootstyle=estilo, width=10,
-        ).pack(side='right', padx=(8, 0))
+    def gancho(codigo, wparam, lparam):
+        if codigo == HCBT_ACTIVATE and not posicionado:
+            classe = ctypes.create_unicode_buffer(16)
+            user32.GetClassNameW(wintypes.HWND(wparam), classe, 16)
+            if classe.value == '#32770':  # classe das caixas de diálogo do Windows
+                app, caixa = wintypes.RECT(), wintypes.RECT()
+                user32.GetWindowRect(janela_app, ctypes.byref(app))
+                user32.GetWindowRect(wintypes.HWND(wparam), ctypes.byref(caixa))
+                largura, altura = caixa.right - caixa.left, caixa.bottom - caixa.top
+                x = (app.left + app.right - largura) // 2
+                y = (app.top + app.bottom - altura) // 2
+                user32.SetWindowPos(
+                    wintypes.HWND(wparam), None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+                posicionado.append(True)
+        return user32.CallNextHookEx(None, codigo, wparam, lparam)
 
-    dialogo.update_idletasks()
-    largura, altura = dialogo.winfo_reqwidth(), dialogo.winfo_reqheight()
-    largura_conteudo = raiz.winfo_width() - LARGURA_SIDEBAR
-    x = raiz.winfo_rootx() + LARGURA_SIDEBAR + max(0, (largura_conteudo - largura) // 2)
-    y = raiz.winfo_rooty() + (raiz.winfo_height() - altura) // 2
-    dialogo.geometry(f'{largura}x{altura}+{x}+{y}')
-    dialogo.grab_set()
-    dialogo.wait_window()
-    return resultado['valor']
+    callback = proc_tipo(gancho)
+    id_gancho = user32.SetWindowsHookExW(WH_CBT, callback, None, ctypes.windll.kernel32.GetCurrentThreadId())
+    try:
+        return abrir()
+    finally:
+        if id_gancho:
+            user32.UnhookWindowsHookEx(id_gancho)
 
 
 def _avisar(widget, titulo, mensagem):
-    _dialogo(widget, titulo, mensagem, '⚠', tema.COR_AVISO, ('OK',))
+    janela = widget.winfo_toplevel()
+    _abrir_aviso_no_centro(janela, lambda: messagebox.showwarning(titulo, mensagem, parent=janela))
 
 
 def _informar(widget, titulo, mensagem):
-    _dialogo(widget, titulo, mensagem, '✓', tema.COR_SUCESSO, ('OK',))
+    janela = widget.winfo_toplevel()
+    _abrir_aviso_no_centro(janela, lambda: messagebox.showinfo(titulo, mensagem, parent=janela))
 
 
 def _erro(widget, titulo, mensagem):
-    _dialogo(widget, titulo, mensagem, '✕', tema.COR_ERRO, ('OK',))
+    janela = widget.winfo_toplevel()
+    _abrir_aviso_no_centro(janela, lambda: messagebox.showerror(titulo, mensagem, parent=janela))
 
 
 def _confirmar(widget, titulo, mensagem):
-    return _dialogo(widget, titulo, mensagem, '?', tema.COR_PRIMARIA, ('Cancelar', 'Sim')) == 'Sim'
+    janela = widget.winfo_toplevel()
+    return _abrir_aviso_no_centro(janela, lambda: messagebox.askyesno(titulo, mensagem, parent=janela))
+
 
 # RASCUNHO - conteúdo do "Manual rápido" (ver _mostrar_manual). Cobre as regras que mais
 # geram dúvida/erro na prática (subsidiária, espécie x quantidade, item repetido) - revisar
@@ -181,6 +202,164 @@ padrão" volta pra ordem definida pelo escritório.
 "Histórico" lista os últimos documentos Word gerados nesta máquina,
 com atalho pra reabrir o arquivo.
 """
+
+
+_INDICADORES = {}
+
+
+def _indicadores(widget):
+    """Imagens de caixa de seleção e botão de opção - mesma receita do ttkbootstrap
+    (create_checkbutton_assets/create_radiobutton_assets), já sobre o fundo branco do card e
+    com largura que reproduz o espaçamento do indicador do ttk."""
+    if _INDICADORES:
+        return _INDICADORES
+    fator = float(widget.tk.call('tk', 'scaling')) / 1.33398982438864281
+    lado, largura = math.ceil(14 * fator), math.ceil(18 * fator)
+    fundo, cor, marca = tema.COR_FUNDO, tema.COR_PRIMARIA, '#FFFFFF'
+    borda = Colors.make_transparent(0.4, tema.COR_TEXTO, fundo)
+    apagado = Colors.make_transparent(0.3, tema.COR_TEXTO, fundo)
+    fonte = ImageFont.truetype('seguisym.ttf', 120)
+
+    def gerar(desenhar):
+        grande = Image.new('RGBA', (134, 134))
+        desenhar(ImageDraw.Draw(grande))
+        tela = Image.new('RGBA', (largura, lado), fundo)
+        tela.alpha_composite(grande.resize((lado, lado), Image.LANCZOS))
+        return ImageTk.PhotoImage(tela.convert('RGB'))
+
+    quadrado = dict(xy=[2, 2, 132, 132], radius=16)
+    _INDICADORES['caixa'] = {
+        'off': gerar(lambda d: d.rounded_rectangle(**quadrado, outline=borda, width=6, fill=fundo)),
+        'on': gerar(lambda d: (d.rounded_rectangle(**quadrado, fill=cor, outline=cor, width=3),
+                               d.text((20, -20), '✓', font=fonte, fill=marca))),
+        'dis': gerar(lambda d: d.rounded_rectangle(**quadrado, outline=apagado, width=3)),
+        'dis_on': gerar(lambda d: (d.rounded_rectangle(**quadrado, fill=apagado, outline=apagado, width=3),
+                                   d.text((20, -20), '✓', font=fonte, fill=fundo))),
+    }
+    circulo = [1, 1, 133, 133]
+    _INDICADORES['opcao'] = {
+        'off': gerar(lambda d: d.ellipse(circulo, outline=borda, width=6, fill=fundo)),
+        'on': gerar(lambda d: (d.ellipse(circulo, fill=cor), d.ellipse([40, 40, 94, 94], fill=marca))),
+        'dis': gerar(lambda d: d.ellipse(circulo, outline=apagado, width=3, fill=fundo)),
+        'dis_on': gerar(lambda d: (d.ellipse(circulo, fill=apagado), d.ellipse([40, 40, 94, 94], fill=fundo))),
+    }
+    _INDICADORES['apagado'] = apagado
+    return _INDICADORES
+
+
+class _IndicadorLeve:
+    """Checkbutton/Radiobutton do tk clássico com as imagens do tema no lugar do indicador.
+    Mesma aparência do ttk, mas ~14x mais barato de redesenhar no Windows: com dezenas deles
+    na tela, os do ttk deixavam redimensionar e adicionar pedidos/benefícios lentos."""
+
+    _TIPO = None
+
+    def __init__(self, parent, **kw):
+        indicadores = _indicadores(parent)
+        self._imagens = indicadores[self._TIPO]
+        self._apagado = indicadores['apagado']
+        self._desabilitado = False
+        super().__init__(
+            parent, image=self._imagens['off'], selectimage=self._imagens['on'], compound='left',
+            indicatoron=False, font=('Segoe UI', 10), foreground=tema.COR_TEXTO,
+            activeforeground=tema.COR_TEXTO, background=tema.COR_FUNDO,
+            activebackground=tema.COR_FUNDO, selectcolor=tema.COR_FUNDO, borderwidth=0,
+            relief='flat', offrelief='flat', overrelief='flat', highlightthickness=0,
+            padx=0, pady=0, tristatevalue='\x00', cursor='arrow', autostyle=False, **kw,
+        )
+        for evento in ('<Button-1>', '<ButtonRelease-1>', '<space>'):
+            self.bind(evento, lambda e: 'break' if self._desabilitado else None)
+
+    def configure(self, cnf=None, **kw):
+        # "disabled" de verdade faz o Tk pontilhar a imagem - aqui o estado é simulado:
+        # imagem e texto apagados + cliques/teclado ignorados.
+        if 'state' in kw:
+            self._desabilitado = kw.pop('state') == 'disabled'
+            sufixo = 'dis' if self._desabilitado else ''
+            cor = self._apagado if self._desabilitado else tema.COR_TEXTO
+            kw.update(
+                image=self._imagens[sufixo or 'off'], selectimage=self._imagens[f'{sufixo}_on' if sufixo else 'on'],
+                foreground=cor, activeforeground=cor, takefocus=0 if self._desabilitado else 1,
+            )
+        return super().configure(cnf, **kw)
+
+    config = configure
+
+
+class CaixaSelecao(_IndicadorLeve, tk.Checkbutton):
+    _TIPO = 'caixa'
+
+
+class BotaoOpcao(_IndicadorLeve, tk.Radiobutton):
+    _TIPO = 'opcao'
+
+
+# Widgets do tk clássico para a página Pedidos (dentro dos cards brancos): 2-3x mais
+# baratos de redesenhar no Windows que os equivalentes ttk, com cores/fontes do tema.
+FONTE = ('Segoe UI', 10)
+COR_BORDA_CAMPO = tema.CORES['border']
+
+
+def _rotulo(pai, texto='', ajuda=False, fundo=tema.COR_FUNDO, cor=None, fonte=None, **kw):
+    return tk.Label(
+        pai, text=texto, background=fundo,
+        foreground=cor or (tema.COR_AJUDA if ajuda else tema.COR_TEXTO),
+        font=fonte or (('Segoe UI', 9) if ajuda else FONTE), autostyle=False, **kw,
+    )
+
+
+def _campo(pai, largura):
+    return tk.Entry(
+        pai, width=largura, font=FONTE, relief='flat', borderwidth=5, background=tema.COR_FUNDO,
+        foreground=tema.COR_TEXTO, insertbackground=tema.COR_TEXTO, highlightthickness=1,
+        highlightbackground=COR_BORDA_CAMPO, highlightcolor=tema.COR_PRIMARIA,
+        selectbackground=tema.COR_PRIMARIA, selectforeground='#FFFFFF', autostyle=False,
+    )
+
+
+def _escurecer(cor):
+    return Colors.update_hsv(cor, vd=-0.12)
+
+
+def _botao(pai, texto, comando, cor=tema.COR_PRIMARIA, padx=14, estilo='contorno', fundo=tema.COR_FUNDO):
+    """Botão feito de Label clicável (no Windows o tk.Button não desenha a borda de
+    highlight). Estilos, espelhando os bootstyles usados antes:
+    'contorno' (texto/borda na cor, preenche ao passar o mouse), 'cheio' (fundo na cor),
+    'link' (só texto) e 'suave' (fundo cinza-claro)."""
+    branco = '#FFFFFF'
+    normal, ativo = {
+        'contorno': ((cor, fundo, cor), (branco, cor, cor)),
+        'cheio': ((branco, cor, cor), (branco, _escurecer(cor), _escurecer(cor))),
+        'link': ((cor, fundo, fundo), (_escurecer(cor), fundo, fundo)),
+        'suave': ((tema.COR_TEXTO, tema.COR_FUNDO_SUAVE, tema.COR_FUNDO_SUAVE),
+                  (tema.COR_TEXTO, _escurecer(tema.COR_FUNDO_SUAVE), _escurecer(tema.COR_FUNDO_SUAVE))),
+    }[estilo]
+    botao = tk.Label(
+        pai, text=texto, font=FONTE, highlightthickness=1, padx=padx, pady=6, cursor='hand2',
+        autostyle=False,
+    )
+
+    def aplicar(cores):
+        texto_cor, fundo_cor, borda = cores
+        botao.configure(foreground=texto_cor, background=fundo_cor, highlightbackground=borda, highlightcolor=borda)
+
+    def soltar(evento):
+        if 0 <= evento.x < botao.winfo_width() and 0 <= evento.y < botao.winfo_height():
+            comando()
+
+    aplicar(normal)
+    botao.bind('<Enter>', lambda e: aplicar(ativo))
+    botao.bind('<Leave>', lambda e: aplicar(normal))
+    botao.bind('<ButtonRelease-1>', soltar)
+    return botao
+
+
+def _linha_divisoria(pai):
+    return tk.Frame(pai, height=1, background=COR_BORDA_CAMPO, autostyle=False)
+
+
+def _quadro(pai, fundo=tema.COR_FUNDO, **kw):
+    return tk.Frame(pai, background=fundo, autostyle=False, **kw)
 
 
 def _ignorar_scroll(event):
@@ -481,7 +660,7 @@ def _reconstruir_combo_parametro(frame_parametro, combo_tese, label_widget=None)
     if label_widget is not None:
         label_widget.configure(text=rotulo)
     elif rotulo:
-        ttk.Label(frame_parametro, text=rotulo).pack(side='left', padx=(0, 6))
+        _rotulo(frame_parametro, rotulo).pack(side='left', padx=(0, 6))
 
     if parametro_id:
         config = PARAMETROS_TESE[parametro_id]
@@ -494,7 +673,7 @@ def _reconstruir_combo_parametro(frame_parametro, combo_tese, label_widget=None)
         return combo_parametro
 
     if campo_texto:
-        entry_texto = ttk.Entry(frame_parametro, width=42)
+        entry_texto = _campo(frame_parametro, 42)
         entry_texto.pack(side='left')
         return entry_texto
 
@@ -525,10 +704,9 @@ def _criar_cartao(parent, titulo, padding=14, **_ignorados):
     ttkbootstrap): o traço da borda antes do texto do título simplesmente não desenha.
     Inofensivo enquanto o fundo ao redor do card era branco igual ao card (o padrão usado
     em todo o app antes) - ficou visível assim que a página passou a ter um fundo cinza ao
-    redor dos cards (ver Pagina.TFrame). Aqui a borda é só um Frame de 1px (moldura) - como
-    nada nunca desenha "por cima" dela, o bug não se aplica. 'interior' empacota o título
-    (pack) e 'conteudo' (pack) como irmãos - 'conteudo' fica livre para os filhos reais do
-    card usarem grid ou pack à vontade, sem conflitar com o pack do próprio título.
+    redor dos cards (ver Pagina.TFrame). Aqui a borda é a do próprio ttk.Frame (estilo
+    Cartao.TFrame) - como nada nunca desenha "por cima" dela, o bug não se aplica. O título
+    usa place(), então não conflita com o grid/pack que os filhos do card usarem.
 
     Tentativa anterior usava cantos arredondados desenhados à mão num Canvas - abandonada:
     causava bugs visuais reais (borda invisível, corrida de redesenho em cards aninhados
@@ -537,19 +715,22 @@ def _criar_cartao(parent, titulo, padding=14, **_ignorados):
     quebrada.
 
     Retorna (casca, conteudo, rotulo_titulo): 'casca' é o que quem chama empacota/destrói;
-    'conteudo' cumpre o mesmo papel de parent pros filhos que o Labelframe cumpria antes;
+    'conteudo' (hoje o mesmo widget que a casca) é o parent dos filhos do card;
     'rotulo_titulo' é pra poder trocar o texto do título (ex: renumerar "Pedido 2" ->
     "Pedido 1")."""
-    casca = ttk.Frame(parent, style="Pagina.TFrame")
-    moldura = tk.Frame(casca, background=tema.COR_BORDA)
-    moldura.pack(fill='both', expand=True)
-    interior = ttk.Frame(moldura, padding=(padding, padding - 4, padding, padding))
-    interior.pack(fill='both', expand=True, padx=1, pady=1)
-    rotulo_titulo = ttk.Label(interior, text=titulo, style="TituloCartaoInterno.TLabel")
-    rotulo_titulo.pack(anchor='w', pady=(0, 8))
-    conteudo = ttk.Frame(interior)
-    conteudo.pack(fill='both', expand=True)
-    return casca, conteudo, rotulo_titulo
+    # Um só widget para fundo, borda e conteúdo (antes eram 4 frames aninhados): no Windows,
+    # cada nível de frame que muda de tamanho redesenha de novo tudo o que está dentro dele.
+    # O título fica com place() no topo, e o padding superior reserva o espaço dele - assim
+    # quem chama pode usar grid ou pack direto na casca.
+    casca = ttk.Frame(parent, style="Cartao.TFrame")
+    rotulo_titulo = tk.Label(
+        casca, text=titulo, background=tema.COR_FUNDO, foreground=tema.COR_PRIMARIA,
+        font=('Segoe UI', 11, 'bold'), borderwidth=0, padx=0, pady=0, autostyle=False,
+    )
+    borda = 1
+    rotulo_titulo.place(x=borda + padding, y=borda + padding - 4, bordermode='ignore')
+    casca.configure(padding=(padding, padding - 4 + rotulo_titulo.winfo_reqheight() + 8, padding, padding))
+    return casca, casca, rotulo_titulo
 
 
 class ComboboxPesquisavel(ttk.Combobox):
@@ -617,24 +798,24 @@ class ComboboxPesquisavel(ttk.Combobox):
 
 
 class LinhaBeneficio:
-    def __init__(self, parent, on_remover, especie_travada=None):
+    def __init__(self, parent, on_remover, especie_travada=None, antes=None):
         self.on_remover = on_remover
 
-        self.frame = ttk.Frame(parent)
-        self.frame.pack(fill='x', anchor='w', pady=3)
+        self.frame = _quadro(parent)
+        self.frame.pack(fill='x', anchor='w', pady=3, before=antes)
 
         self.var_especie = tk.StringVar(value='')
         self.radios_especie = {}
         for especie in ESPECIES_SUBSIDIARIA:
-            radio = ttk.Radiobutton(self.frame, text=especie, variable=self.var_especie, value=especie)
+            radio = BotaoOpcao(self.frame, text=especie, variable=self.var_especie, value=especie)
             radio.pack(side='left', padx=(0, 10))
             self.radios_especie[especie] = radio
 
-        ttk.Label(self.frame, text="Nº do benefício:").pack(side='left', padx=(8, 4))
-        self.entry_numero = ttk.Entry(self.frame, width=18)
+        _rotulo(self.frame, "Nº do benefício:").pack(side='left', padx=(8, 4))
+        self.entry_numero = _campo(self.frame, 18)
         self.entry_numero.pack(side='left', padx=(0, 8))
 
-        ttk.Button(self.frame, text="×", width=3, command=self._remover, bootstyle='danger-outline').pack(side='left')
+        _botao(self.frame, "×", self._remover, cor=tema.COR_ERRO, padx=10).pack(side='left')
 
         if especie_travada:
             self.aplicar_travamento(especie_travada)
@@ -665,7 +846,7 @@ class LinhaBeneficio:
 
 
 class GrupoSubsidiario:
-    def __init__(self, parent, on_remover, numero=1, obter_especie_travada=None):
+    def __init__(self, parent, on_remover, numero=1, obter_especie_travada=None, antes=None):
         self.on_remover = on_remover
         # Consultado a cada novo benefício adicionado, para travar a espécie na mesma da
         # tese principal quando esta citar uma só espécie (ver BlocoPedido).
@@ -676,38 +857,37 @@ class GrupoSubsidiario:
         nomes_teses = ordenar_nomes_teses(_chaves_teses_subsidiarias_compativeis())
 
         self._casca, self.frame, self._rotulo_titulo = _criar_cartao(parent, f"Tese subsidiária {numero}", padding=12)
-        self._casca.pack(fill='x', expand=True, pady=(0, 8))
+        self._casca.pack(fill='x', expand=True, pady=(0, 8), before=antes)
 
-        linha = ttk.Frame(self.frame)
+        linha = _quadro(self.frame)
         linha.pack(fill='x', anchor='w')
-        ttk.Label(linha, text="Tese:").grid(row=0, column=0, sticky='w', padx=(0, 6))
+        _rotulo(linha, "Tese:").grid(row=0, column=0, sticky='w', padx=(0, 6))
         self.combo_tese = ComboboxPesquisavel(linha, valores=nomes_teses, width=38)
         self.combo_tese.grid(row=0, column=1, sticky='w')
         self.combo_tese.bind('<<ComboboxSelected>>', lambda e: self._atualizar_parametro(), add='+')
 
-        ttk.Label(linha, text="Item da petição:").grid(row=0, column=2, sticky='w', padx=(16, 6))
-        self.entry_item = ttk.Entry(linha, width=10)
+        _rotulo(linha, "Item da petição:").grid(row=0, column=2, sticky='w', padx=(16, 6))
+        self.entry_item = _campo(linha, 10)
         self.entry_item.grid(row=0, column=3, sticky='w')
 
-        self.frame_parametro = ttk.Frame(self.frame)
+        self.frame_parametro = _quadro(self.frame)
         self.frame_parametro.pack(fill='x', anchor='w', pady=(8, 0))
         self.combo_parametro = None
         self._atualizar_parametro()
 
-        ttk.Label(self.frame, text="Benefícios desta tese subsidiária:").pack(anchor='w', pady=(10, 4))
-        ttk.Label(
-            self.frame,
-            text="Se todos os benefícios forem subsidiários da mesma tese, não adicione benefícios.",
-            style='Ajuda.TLabel', wraplength=560, justify='left',
+        _rotulo(self.frame, "Benefícios desta tese subsidiária:").pack(anchor='w', pady=(10, 4))
+        _rotulo(
+            self.frame, "Se todos os benefícios forem subsidiários da mesma tese, não adicione benefícios.",
+            ajuda=True, wraplength=560, justify='left',
         ).pack(anchor='w', pady=(0, 6))
-        self.frame_beneficios = ttk.Frame(self.frame)
-        self.frame_beneficios.pack(fill='x', anchor='w')
         self.linhas_beneficio = []
 
-        rodape = ttk.Frame(self.frame)
+        # Linhas de benefício entram direto no card, antes do rodapé (sem frame próprio: um
+        # nível a menos de aninhamento deixa adicionar/redimensionar bem mais leve).
+        rodape = self._rodape = _quadro(self.frame)
         rodape.pack(fill='x', pady=(8, 0))
-        ttk.Button(rodape, text="+ Adicionar benefício", command=self.adicionar_beneficio, bootstyle='primary-outline').pack(side='left')
-        ttk.Button(rodape, text="Remover tese subsidiária", command=self._remover, bootstyle='danger-outline').pack(side='right')
+        _botao(rodape, "+ Adicionar benefício", self.adicionar_beneficio).pack(side='left')
+        _botao(rodape, "Remover tese subsidiária", self._remover, cor=tema.COR_ERRO).pack(side='right')
 
         # Abre sem nenhum benefício adicionado (ver validar_beneficios_subsidiaria): o
         # usuário só adiciona uma linha se quiser especificar benefícios individuais - caso
@@ -719,8 +899,8 @@ class GrupoSubsidiario:
 
     def adicionar_beneficio(self):
         linha = LinhaBeneficio(
-            self.frame_beneficios, on_remover=self._remover_linha_beneficio,
-            especie_travada=self.obter_especie_travada(),
+            self.frame, on_remover=self._remover_linha_beneficio,
+            especie_travada=self.obter_especie_travada(), antes=self._rodape,
         )
         self.linhas_beneficio.append(linha)
 
@@ -793,8 +973,11 @@ class GrupoSubsidiario:
 
 
 class BlocoPedido:
-    def __init__(self, parent, on_remover, numero=1):
+    def __init__(self, parent, on_remover, numero=1, on_mudar_vigencia_ntp=None):
         self.on_remover = on_remover
+        self._on_mudar_vigencia_ntp = on_mudar_vigencia_ntp or (lambda: None)
+        # Liberado pela Janela quando algum pedido de Contestação administrativa cita vigência até 2017.
+        self._ntp_disponivel = False
         nomes_teses = ordenar_nomes_teses()
 
         self._casca, self.frame, self._rotulo_titulo = _criar_cartao(parent, f"Pedido {numero}")
@@ -807,33 +990,40 @@ class BlocoPedido:
         self.frame.columnconfigure(0, pad=38)
         self.frame.columnconfigure(1, weight=1)
 
-        ttk.Label(self.frame, text="Tese principal:").grid(row=0, column=0, sticky='w', pady=(0, 4))
+        _rotulo(self.frame, "Tese principal:").grid(row=0, column=0, sticky='w', pady=(0, 4))
         self.combo_tese = ComboboxPesquisavel(self.frame, valores=nomes_teses, width=45)
         self.combo_tese.grid(row=0, column=1, sticky='w', pady=(0, 4))
         self.combo_tese.bind(
             '<<ComboboxSelected>>',
             lambda e: [
                 self._atualizar_parametro(), self._atualizar_estado_especies(), self._atualizar_estado_quantidade(),
-                self._atualizar_estado_subsidiario(),
+                self._atualizar_estado_subsidiario(), self._atualizar_estado_ntp(), self._on_mudar_vigencia_ntp(),
             ],
             add='+',
         )
 
-        self.label_quantidade = ttk.Label(self.frame, text="Quantidade de benefícios:")
+        self.label_quantidade = _rotulo(self.frame, "Quantidade de benefícios:")
         self.label_quantidade.grid(row=1, column=0, sticky='w', pady=(8, 4))
-        self.entry_quantidade = ttk.Entry(self.frame, width=10)
-        self.entry_quantidade.grid(row=1, column=1, sticky='w', pady=(8, 4))
+        self.frame_quantidade = _quadro(self.frame)
+        self.frame_quantidade.grid(row=1, column=1, sticky='w', pady=(8, 4))
+        self.entry_quantidade = _campo(self.frame_quantidade, 10)
+        self.entry_quantidade.pack(side='left')
         self.entry_quantidade.bind('<KeyRelease>', lambda e: self._ao_mudar_quantidade())
+        self.var_indice_singular = tk.BooleanVar(value=False)
+        self.check_indice_singular = CaixaSelecao(
+            self.frame_quantidade, text="Índice do FAP no singular",
+            variable=self.var_indice_singular,
+        )
         self._atualizar_estado_quantidade()
 
-        self.label_especies = ttk.Label(self.frame, text="Espécie(s):")
+        self.label_especies = _rotulo(self.frame, "Espécie(s):")
         self.label_especies.grid(row=2, column=0, sticky='w', pady=(8, 4))
-        self.frame_especies = frame_especies = ttk.Frame(self.frame)
+        self.frame_especies = frame_especies = _quadro(self.frame)
         frame_especies.grid(row=2, column=1, sticky='w', pady=(8, 4))
         self.vars_especies = {especie: tk.BooleanVar(value=(i == 0)) for i, especie in enumerate(ESPECIES)}
         self.checks_especies = {}
         for especie in ESPECIES:
-            check = ttk.Checkbutton(
+            check = CaixaSelecao(
                 frame_especies, text=especie, variable=self.vars_especies[especie],
                 command=lambda e=especie: self._ao_marcar_especie(e),
             )
@@ -841,37 +1031,49 @@ class BlocoPedido:
             self.checks_especies[especie] = check
         self._atualizar_estado_especies()
 
-        self.label_parametro = ttk.Label(self.frame)
+        self.label_parametro = _rotulo(self.frame)
         self.label_parametro.grid(row=3, column=0, sticky='w', pady=(8, 4))
-        self.frame_parametro = ttk.Frame(self.frame)
+        self.frame_parametro = _quadro(self.frame)
         self.frame_parametro.grid(row=3, column=1, sticky='we', pady=(8, 4))
         self.combo_parametro = None
+        self.var_varios_estabelecimentos = tk.BooleanVar(value=False)
         self._atualizar_parametro()
 
-        ttk.Label(self.frame, text="Item do pedido:").grid(row=4, column=0, sticky='w', pady=(8, 4))
-        self.entry_item = ttk.Entry(self.frame, width=12)
-        self.entry_item.grid(row=4, column=1, sticky='w', pady=(8, 4))
+        _rotulo(self.frame, "Item do pedido:").grid(row=4, column=0, sticky='w', pady=(8, 4))
+        frame_item = _quadro(self.frame)
+        frame_item.grid(row=4, column=1, sticky='w', pady=(8, 4))
+        self.entry_item = _campo(frame_item, 12)
+        self.entry_item.pack(side='left')
+        self.var_excluir_ntp = tk.BooleanVar(value=False)
+        self.check_excluir_ntp = CaixaSelecao(
+            frame_item, text="Incluir exclusão dos NTP", variable=self.var_excluir_ntp,
+            command=self._atualizar_estado_ntp_singular,
+        )
+        self.var_ntp_singular = tk.BooleanVar(value=False)
+        self.check_ntp_singular = CaixaSelecao(
+            frame_item, text="NTP no singular", variable=self.var_ntp_singular,
+        )
+        self._atualizar_estado_ntp()
 
         self.grupos_subsidiarios = []
 
         self.var_subsidiario = tk.BooleanVar(value=False)
-        self.check_subsidiario = ttk.Checkbutton(
+        self.check_subsidiario = CaixaSelecao(
             self.frame, text="Possui pedido subsidiário?", variable=self.var_subsidiario,
             command=self._alternar_subsidiario,
         )
         self.check_subsidiario.grid(row=5, column=0, columnspan=2, sticky='w', pady=(14, 0))
 
-        self.frame_subsidiario = ttk.Frame(self.frame)
-        self.frame_grupos = ttk.Frame(self.frame_subsidiario)
-        self.frame_grupos.pack(fill='x', anchor='w')
-        ttk.Button(
-            self.frame_subsidiario, text="+ Adicionar tese subsidiária",
-            command=self.adicionar_grupo_subsidiario, bootstyle='primary-outline',
-        ).pack(anchor='w', pady=(6, 0))
+        # Cards das teses subsidiárias entram direto aqui, antes do botão (sem frame próprio).
+        self.frame_subsidiario = _quadro(self.frame)
+        self._botao_adicionar_subsidiaria = _botao(
+            self.frame_subsidiario, "+ Adicionar tese subsidiária", self.adicionar_grupo_subsidiario,
+        )
+        self._botao_adicionar_subsidiaria.pack(anchor='w', pady=(6, 0))
         self._atualizar_estado_subsidiario()
 
-        ttk.Separator(self.frame).grid(row=7, column=0, columnspan=2, sticky='ew', pady=(14, 10))
-        ttk.Button(self.frame, text="Remover este pedido", command=self._remover, bootstyle='danger-outline').grid(
+        _linha_divisoria(self.frame).grid(row=7, column=0, columnspan=2, sticky='ew', pady=(14, 10))
+        _botao(self.frame, "Remover este pedido", self._remover, cor=tema.COR_ERRO).grid(
             row=8, column=0, columnspan=2, sticky='e',
         )
 
@@ -879,6 +1081,13 @@ class BlocoPedido:
         self.combo_parametro = _reconstruir_combo_parametro(
             self.frame_parametro, self.combo_tese, label_widget=self.label_parametro,
         )
+        if nome_para_chave(self.combo_tese.get()) == TESE_QUE_LIBERA_NTP and self.combo_parametro is not None:
+            self.combo_parametro.bind('<KeyRelease>', lambda e: self._on_mudar_vigencia_ntp())
+        self.var_varios_estabelecimentos.set(False)
+        if self._varios_estabelecimentos_aplicavel():
+            CaixaSelecao(
+                self.frame_parametro, text="Mais de um estabelecimento", variable=self.var_varios_estabelecimentos,
+            ).pack(side='left', padx=(16, 0))
         # Teses sem campo extra não reservam a linha (some o espaço em branco e "Item do
         # pedido" sobe, ficando logo abaixo de "Tese principal").
         if self.combo_parametro is None:
@@ -921,10 +1130,62 @@ class BlocoPedido:
         ignora = bool(tese and tese.get('ignora_quantidade'))
         if ignora:
             self.label_quantidade.grid_remove()
-            self.entry_quantidade.grid_remove()
+            self.frame_quantidade.grid_remove()
         else:
             self.label_quantidade.grid()
-            self.entry_quantidade.grid()
+            self.frame_quantidade.grid()
+        self._atualizar_estado_indice_singular()
+
+    def _indice_singular_aplicavel(self):
+        tese_key = nome_para_chave(self.combo_tese.get())
+        quantidade = self._quantidade_atual()
+        return (
+            tese_key is not None and tese_permite_indice_singular(tese_key)
+            and quantidade is not None and quantidade > 1
+        )
+
+    def _atualizar_estado_indice_singular(self):
+        if self._indice_singular_aplicavel():
+            self.check_indice_singular.pack(side='left', padx=(16, 0))
+        else:
+            self.var_indice_singular.set(False)
+            self.check_indice_singular.pack_forget()
+
+    def _varios_estabelecimentos_aplicavel(self):
+        tese = TESES.get(nome_para_chave(self.combo_tese.get()))
+        return bool(tese and 'motivo_fixo_varios_estabelecimentos' in tese)
+
+    def libera_ntp(self):
+        if nome_para_chave(self.combo_tese.get()) != TESE_QUE_LIBERA_NTP or self.combo_parametro is None:
+            return False
+        return vigencia_libera_ntp(self.combo_parametro.get())
+
+    def definir_ntp_disponivel(self, disponivel):
+        self._ntp_disponivel = disponivel
+        self._atualizar_estado_ntp()
+
+    def _ntp_aplicavel(self):
+        tese_key = nome_para_chave(self.combo_tese.get())
+        return self._ntp_disponivel and tese_key is not None and tese_permite_exclusao_ntp(tese_key)
+
+    def _atualizar_estado_ntp(self):
+        if self._ntp_aplicavel():
+            self.check_excluir_ntp.pack(side='left', padx=(16, 0))
+        else:
+            self.var_excluir_ntp.set(False)
+            self.check_excluir_ntp.pack_forget()
+        self._atualizar_estado_ntp_singular()
+
+    def _ntp_singular_aplicavel(self):
+        quantidade = self._quantidade_atual()
+        return self.var_excluir_ntp.get() and self._ntp_aplicavel() and quantidade is not None and quantidade > 1
+
+    def _atualizar_estado_ntp_singular(self):
+        if self._ntp_singular_aplicavel():
+            self.check_ntp_singular.pack(side='left', padx=(16, 0))
+        else:
+            self.var_ntp_singular.set(False)
+            self.check_ntp_singular.pack_forget()
 
     def _atualizar_estado_subsidiario(self):
         """Desabilita (e desmarca) o checkbox "Possui pedido subsidiário?" para teses que
@@ -970,6 +1231,8 @@ class BlocoPedido:
             if especie not in permitidas:
                 self.vars_especies[especie].set(False)
         self._atualizar_travamento_subsidiarias()
+        self._atualizar_estado_indice_singular()
+        self._atualizar_estado_ntp_singular()
 
     def _posicionar_frame_subsidiario(self):
         self.frame_subsidiario.grid(row=6, column=0, columnspan=2, sticky='ew', pady=(8, 0))
@@ -984,8 +1247,8 @@ class BlocoPedido:
 
     def adicionar_grupo_subsidiario(self):
         grupo = GrupoSubsidiario(
-            self.frame_grupos, on_remover=self._remover_grupo_subsidiario, numero=len(self.grupos_subsidiarios) + 1,
-            obter_especie_travada=self._especie_unica_travada,
+            self.frame_subsidiario, on_remover=self._remover_grupo_subsidiario, numero=len(self.grupos_subsidiarios) + 1,
+            obter_especie_travada=self._especie_unica_travada, antes=self._botao_adicionar_subsidiaria,
         )
         self.grupos_subsidiarios.append(grupo)
 
@@ -1049,6 +1312,10 @@ class BlocoPedido:
             'item_peticao': item_peticao,
             'parametro_valor': parametro_valor,
             'campo_texto_valor': campo_texto_valor,
+            'indice_singular': self.var_indice_singular.get() and self._indice_singular_aplicavel(),
+            'excluir_ntp': self.var_excluir_ntp.get() and self._ntp_aplicavel(),
+            'ntp_singular': self.var_ntp_singular.get() and self._ntp_singular_aplicavel(),
+            'varios_estabelecimentos': self.var_varios_estabelecimentos.get() and self._varios_estabelecimentos_aplicavel(),
             'grupos_subsidiarios': [],
         }
 
@@ -1095,41 +1362,40 @@ class Janela:
         # Histórico e Ordem reconstroem o conteúdo toda vez que a página é aberta (dados
         # sempre atuais; edição de Ordem não salva sem clicar em "Salvar" - trocar de
         # página sem salvar simplesmente descarta o que tinha mudado, como um Cancelar).
-        principal = ttk.Frame(root)
-        principal.pack(side='left', fill='both', expand=True)
-
-        area_paginas = ttk.Frame(principal)
-        area_paginas.pack(fill='both', expand=True)
+        # Hierarquia rasa de propósito: no Windows, cada nível de frame que muda de tamanho
+        # redesenha de novo tudo o que está abaixo dele (redimensionar ficava lento).
+        area_paginas = ttk.Frame(root)
+        area_paginas.pack(side='left', fill='both', expand=True)
         area_paginas.grid_rowconfigure(0, weight=1)
         area_paginas.grid_columnconfigure(0, weight=1)
 
-        self._pagina_pedidos = ttk.Frame(area_paginas)
+        self._pagina_pedidos = ttk.Frame(area_paginas, style="Pagina.TFrame")
         self._pagina_historico = ttk.Frame(area_paginas)
         self._pagina_ordem = ttk.Frame(area_paginas)
         for pagina in (self._pagina_pedidos, self._pagina_historico, self._pagina_ordem):
             pagina.grid(row=0, column=0, sticky='nsew')
 
-        botoes = ttk.Frame(self._pagina_pedidos, padding=(28, 12, 28, 16), style="Pagina.TFrame")
+        suave = tema.COR_FUNDO_SUAVE
+        botoes = _quadro(self._pagina_pedidos, fundo=suave, padx=28, pady=14)
         botoes.pack(fill='x', side='bottom')
-        ttk.Separator(self._pagina_pedidos).pack(fill='x', side='bottom')
-        ttk.Button(botoes, text="+ Adicionar pedido", command=self.adicionar_pedido, bootstyle='primary-outline').pack(side='left')
-        ttk.Button(botoes, text="Limpar", command=self._limpar_tudo, bootstyle='danger-link').pack(side='left', padx=(8, 0))
-        ttk.Button(botoes, text="Gerar Word", bootstyle='secondary', command=self.gerar).pack(side='right')
+        _linha_divisoria(self._pagina_pedidos).pack(fill='x', side='bottom')
+        _botao(botoes, "+ Adicionar pedido", self.adicionar_pedido).pack(side='left')
+        _botao(botoes, "Limpar", self._limpar_tudo, cor=tema.COR_ERRO, estilo='link').pack(side='left', padx=(8, 0))
+        _botao(botoes, "Gerar Word", self.gerar, cor=tema.COR_SECUNDARIA, estilo='cheio').pack(side='right')
         # só aparecem depois que existe um documento gerado
-        self._botoes_resultado = ttk.Frame(botoes)
-        ttk.Button(self._botoes_resultado, text="Abrir documento", command=self._abrir_ultimo_documento, bootstyle='light').pack(side='left', padx=(0, 8))
-        ttk.Button(self._botoes_resultado, text="Abrir pasta", command=self._abrir_pasta_ultimo_documento, bootstyle='light').pack(side='left', padx=(0, 12))
+        self._botoes_resultado = _quadro(botoes, fundo=suave)
+        _botao(self._botoes_resultado, "Abrir documento", self._abrir_ultimo_documento, estilo='suave').pack(side='left', padx=(0, 8))
+        _botao(self._botoes_resultado, "Abrir pasta", self._abrir_pasta_ultimo_documento, estilo='suave').pack(side='left', padx=(0, 12))
 
-        container = ttk.Frame(self._pagina_pedidos, padding=(28, 24, 20, 12), style="Pagina.TFrame")
-        container.pack(fill='both', expand=True)
+        container = self._pagina_pedidos
 
-        cabecalho = ttk.Frame(container, style="Pagina.TFrame")
-        cabecalho.pack(fill='x', pady=(0, 16))
-        ttk.Label(cabecalho, text="Pedidos", style="Titulo.TLabel").pack(anchor='w')
-        ttk.Label(
-            cabecalho, text="Monte os pedidos de exclusão de benefícios e gere o texto em Word",
-            style="Descricao.TLabel",
-        ).pack(anchor='w', pady=(2, 0))
+        _rotulo(
+            container, "Pedidos", fundo=suave, cor=tema.COR_PRIMARIA, fonte=('Segoe UI', 16, 'bold'),
+        ).pack(anchor='w', padx=(28, 20), pady=(24, 0))
+        _rotulo(
+            container, "Monte os pedidos de exclusão de benefícios e gere o texto em Word",
+            fundo=suave, cor=tema.COR_AJUDA,
+        ).pack(anchor='w', padx=(28, 20), pady=(2, 16))
 
         self.canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0, background=tema.COR_FUNDO_SUAVE)
 
@@ -1140,7 +1406,7 @@ class Janela:
             # cabia inteiro na tela, já que só a roda do mouse (_ao_rolar) tinha essa trava.
             self._atualizar_scrollregion()
 
-        scrollbar = ttk.Scrollbar(container, orient='vertical', command=_ao_mover_scrollbar)
+        scrollbar = tk.Scrollbar(container, orient='vertical', command=_ao_mover_scrollbar)
         self.frame_interno = ttk.Frame(self.canvas, style="Pagina.TFrame")
         self._id_frame_interno = self.canvas.create_window((0, 0), window=self.frame_interno, anchor='nw')
         # canvas.bbox('all') (bbox do item-janela) demorava a refletir a altura real do
@@ -1154,9 +1420,18 @@ class Janela:
             self._atualizar_scrollregion()
 
         self.canvas.bind('<Configure>', _ao_redimensionar_canvas)
+
+        # Enquanto a janela é redimensionada (arrastar a borda, maximizar), os pedidos ficam
+        # ocultos e só são redesenhados uma vez, ao final - redesenhar dezenas de campos a
+        # cada pixel arrastado é o que deixava o redimensionamento travado.
+        self._tamanho_janela = None
+        self._reexibir_pedidos = None
+        marca = f'redimensionar{id(self)}'
+        self.root.bindtags((marca,) + self.root.bindtags())
+        self.root.bind_class(marca, '<Configure>', self._ao_redimensionar_janela)
         self.canvas.configure(yscrollcommand=scrollbar.set, yscrollincrement=15)
-        self.canvas.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        self.canvas.pack(side='left', fill='both', expand=True, padx=(28, 0), pady=(0, 12))
+        scrollbar.pack(side='right', fill='y', padx=(0, 20), pady=(0, 12))
         # bind no root (não bind_all!) - bind_all usa a bindtag "all", que também afeta a
         # lista suspensa da tese (é uma janela própria, mas "all" é realmente global). Preso
         # ao root, só dispara para widgets desta janela, deixando a lista suspensa em paz.
@@ -1172,22 +1447,27 @@ class Janela:
         self._mostrar_pagina('pedidos')
 
     def _montar_sidebar(self, root):
-        barra = ttk.Frame(root, style="Sidebar.TFrame", width=LARGURA_SIDEBAR)
+        # tk clássico (não ttk) e sem frames intermediários: a barra lateral é redesenhada a
+        # cada passo de redimensionamento da janela.
+        azul = tema.COR_PRIMARIA
+        barra = _quadro(root, fundo=azul, width=LARGURA_SIDEBAR)
         barra.pack(side='left', fill='y')
         barra.pack_propagate(False)
 
-        topo = ttk.Frame(barra, style="Sidebar.TFrame", padding=(20, 26, 20, 18))
-        topo.pack(fill='x')
         caminho_logo = self._res('logo_completa.png')
         if os.path.isfile(caminho_logo):
             self._imagem_marca = _carregar_logo_para_fundo_escuro(caminho_logo, 40)
-            ttk.Label(topo, image=self._imagem_marca, style="Sidebar.TLabel").pack(anchor='w')
-        ttk.Frame(barra, style="Acento.TFrame", height=3).pack(fill='x', padx=20)
+            tk.Label(barra, image=self._imagem_marca, background=azul, borderwidth=0, autostyle=False).pack(
+                anchor='w', padx=20, pady=(26, 18),
+            )
+        _quadro(barra, fundo=tema.COR_SECUNDARIA, height=3).pack(fill='x', padx=20)
 
-        produto = ttk.Frame(barra, style="Sidebar.TFrame", padding=(20, 16, 20, 14))
-        produto.pack(fill='x')
-        ttk.Label(produto, text="GERAPED", style="Sidebar.TLabel", font=("Segoe UI", 20, "bold")).pack(anchor='w')
-        ttk.Label(produto, text="Gerador de Pedidos", style="SidebarSuave.TLabel").pack(anchor='w')
+        _rotulo(barra, "GERAPED", fundo=azul, cor='#FFFFFF', fonte=("Segoe UI", 20, "bold")).pack(
+            anchor='w', padx=20, pady=(16, 0),
+        )
+        _rotulo(barra, "Gerador de Pedidos", fundo=azul, cor=tema.COR_NAV_TEXTO, fonte=("Segoe UI", 9)).pack(
+            anchor='w', padx=20, pady=(0, 14),
+        )
 
         # As 3 páginas (Pedidos/Histórico/Ordem) ficam sobrepostas na mesma janela (ver
         # area_paginas no __init__) - aqui só guardamos as referências de cada linha
@@ -1195,52 +1475,68 @@ class Janela:
         # qualquer uma das 3 pode estar ativa (antes só "Pedidos" existia e ficava sempre
         # marcada).
         self._linhas_nav = {}
-        for nome, texto, comando in (
-            ('pedidos', "☰   Pedidos", lambda: self._mostrar_pagina('pedidos')),
-            ('historico', "↻   Histórico", lambda: self._mostrar_pagina('historico')),
-            ('ordem', "⚙   Ordem", lambda: self._mostrar_pagina('ordem')),
-        ):
-            linha = ttk.Frame(barra, style="Sidebar.TFrame")
-            linha.pack(fill='x')
-            acento = ttk.Frame(linha, style="Sidebar.TFrame", width=4)
-            acento.pack(side='left', fill='y')
-            botao = ttk.Button(linha, text=texto, style="Nav.TButton", command=comando)
-            botao.pack(side='left', fill='x', expand=True)
+        self._pagina_ativa = None
+        for nome, texto in (('pedidos', "☰   Pedidos"), ('historico', "↻   Histórico"), ('ordem', "⚙   Ordem")):
+            # acento = borda esquerda laranja do item ativo
+            botao = tk.Label(
+                barra, text=texto, background=azul, foreground=tema.COR_NAV_TEXTO,
+                font=("Segoe UI", 11), anchor="w", padx=24, pady=12, cursor="hand2",
+                highlightthickness=0, autostyle=False,
+            )
+            botao.pack(fill='x')
+            acento = _quadro(botao, fundo=azul, width=4)
+            acento.place(x=0, y=0, relheight=1)
+
+            def _passar(_e, n=nome, b=botao):
+                if n != self._pagina_ativa:
+                    b.configure(background=tema.COR_NAV_ATIVO, foreground='#FFFFFF')
+
+            def _sair(_e, n=nome, b=botao):
+                if n != self._pagina_ativa:
+                    b.configure(background=azul, foreground=tema.COR_NAV_TEXTO)
+
+            botao.bind('<Enter>', _passar)
+            botao.bind('<Leave>', _sair)
+            botao.bind('<Button-1>', lambda _e, n=nome: self._mostrar_pagina(n))
+            acento.bind('<Button-1>', lambda _e, n=nome: self._mostrar_pagina(n))
             self._linhas_nav[nome] = (acento, botao)
 
-        rodape = ttk.Frame(barra, style="Sidebar.TFrame", padding=(0, 0, 0, 16))
-        rodape.pack(side='bottom', fill='x')
+        rodape = _quadro(barra, fundo=azul)
+        rodape.pack(side='bottom', fill='x', pady=(0, 16))
         # divisor sutil separando o rodapé do resto da sidebar - sem ele o rodapé ficava
         # "boiando" no meio do azul, sem nada delimitando onde a navegação termina. side=
         # 'bottom' e packado DEPOIS de "rodape" (que também é 'bottom') - assim ele ocupa a
         # fatia logo ACIMA do rodapé, não logo abaixo dos itens de navegação lá em cima
         # (pack empilha widgets 'bottom' na ordem em que são chamados, de baixo pra cima).
-        ttk.Frame(barra, style="SidebarDivisor.TFrame", height=1).pack(side='bottom', fill='x', padx=20, pady=(0, 4))
+        _quadro(barra, fundo=tema.COR_NAV_DIVISOR, height=1).pack(side='bottom', fill='x', padx=20, pady=(0, 4))
         self._criar_link_sidebar(rodape, 'ⓘ', 'Notas de atualização', self._mostrar_notas_atualizacao)
         self._criar_link_sidebar(rodape, '?', 'Manual rápido', self._mostrar_manual)
-        ttk.Label(rodape, text=f"Versão {self._versao}", style="SidebarSuave.TLabel").pack(anchor='w', padx=20, pady=(12, 0))
+        _rotulo(rodape, f"Versão {self._versao}", fundo=azul, cor=tema.COR_NAV_TEXTO, fonte=("Segoe UI", 9)).pack(
+            anchor='w', padx=20, pady=(12, 0),
+        )
 
     def _criar_link_sidebar(self, pai, icone, texto, comando):
         """Link do rodapé da barra lateral (ícone + texto). Dois rótulos em vez de um único
         Button com "ícone + espaços + título": o ícone fica numa coluna de largura FIXA EM
         PIXELS (pack_propagate desligado), então o texto sempre começa no mesmo X."""
-        linha = ttk.Frame(pai, style="Sidebar.TFrame", cursor='hand2')
+        azul = tema.COR_PRIMARIA
+        linha = _quadro(pai, fundo=azul, cursor='hand2')
         linha.pack(fill='x')
-        caixa_icone = ttk.Frame(linha, style="Sidebar.TFrame", width=28, height=24)
+        caixa_icone = _quadro(linha, fundo=azul, width=28, height=24)
         caixa_icone.pack(side='left', padx=(20, 0), pady=6)
         caixa_icone.pack_propagate(False)
-        rotulo_icone = ttk.Label(caixa_icone, text=icone, style="SidebarIcone.TLabel", anchor='center')
+        rotulo_icone = _rotulo(caixa_icone, icone, fundo=azul, cor=tema.COR_NAV_ICONE, fonte=("Segoe UI", 9), anchor='center')
         rotulo_icone.pack(fill='both', expand=True)
-        rotulo_texto = ttk.Label(linha, text=texto, style="SidebarLink.TLabel", anchor='w')
+        rotulo_texto = _rotulo(linha, texto, fundo=azul, cor=tema.COR_NAV_TEXTO, fonte=("Segoe UI", 9), anchor='w')
         rotulo_texto.pack(side='left', fill='x', expand=True, pady=6)
 
         def _ao_passar(_evt=None):
-            rotulo_icone.configure(style="SidebarIconeAtivo.TLabel")
-            rotulo_texto.configure(style="SidebarLinkAtivo.TLabel")
+            rotulo_icone.configure(foreground=tema.COR_SECUNDARIA)
+            rotulo_texto.configure(foreground=tema.COR_SECUNDARIA, font=("Segoe UI", 9, "underline"))
 
         def _ao_sair(_evt=None):
-            rotulo_icone.configure(style="SidebarIcone.TLabel")
-            rotulo_texto.configure(style="SidebarLink.TLabel")
+            rotulo_icone.configure(foreground=tema.COR_NAV_ICONE)
+            rotulo_texto.configure(foreground=tema.COR_NAV_TEXTO, font=("Segoe UI", 9))
 
         for widget in (linha, caixa_icone, rotulo_icone, rotulo_texto):
             widget.configure(cursor='hand2')
@@ -1262,12 +1558,23 @@ class Janela:
             self._construir_pagina_historico()
         elif nome == 'ordem':
             self._construir_pagina_ordem()
-        paginas[nome].tkraise()
+        # grid_remove (não só tkraise): página escondida atrás de outra continua sendo
+        # relayoutada e redesenhada a cada redimensionamento da janela.
+        for chave, pagina in paginas.items():
+            if chave == nome:
+                pagina.grid()
+            else:
+                pagina.grid_remove()
 
+        self._pagina_ativa = nome
         for chave, (acento, botao) in self._linhas_nav.items():
             ativo = chave == nome
-            acento.configure(style="Acento.TFrame" if ativo else "Sidebar.TFrame")
-            botao.configure(style="NavAtivo.TButton" if ativo else "Nav.TButton")
+            acento.configure(background=tema.COR_SECUNDARIA if ativo else tema.COR_PRIMARIA)
+            botao.configure(
+                background=tema.COR_NAV_ATIVO if ativo else tema.COR_PRIMARIA,
+                foreground='#FFFFFF' if ativo else tema.COR_NAV_TEXTO,
+                font=("Segoe UI", 11, "bold") if ativo else ("Segoe UI", 11),
+            )
 
     def _mostrar_toast(self, mensagem, cor_fundo=None):
         """Aviso temporário que aparece sozinho e some sozinho (sem precisar clicar em
@@ -1284,23 +1591,37 @@ class Janela:
         except Exception:
             pass
         toast.configure(background=cor_fundo)
+        # autostyle=False: sem isso o ttkbootstrap troca o fundo verde pelo branco do tema.
         tk.Label(
             toast, text=mensagem, background=cor_fundo, foreground='#FFFFFF',
-            font=('Segoe UI', 10, 'bold'), padx=22, pady=12,
+            font=('Segoe UI', 10, 'bold'), padx=22, pady=12, autostyle=False,
         ).pack()
         toast.update_idletasks()
         largura, altura = toast.winfo_reqwidth(), toast.winfo_reqheight()
-        # Centralizado verticalmente no meio da janela inteira (mesmo eixo em que o
-        # messagebox padrão, ex: o "Aviso" de validação, sempre aparece, pra ficar
-        # previsível - não perto do topo, sobrepondo o cabeçalho da página). Horizontalmente,
-        # centralizado só na área de CONTEÚDO (excluindo a sidebar): centralizar na janela
-        # inteira jogava o toast visualmente pra esquerda, "puxado" pela sidebar, que não tem
-        # contraparte à direita.
-        largura_conteudo = self.root.winfo_width() - LARGURA_SIDEBAR
-        x = self.root.winfo_rootx() + LARGURA_SIDEBAR + max(0, (largura_conteudo - largura) // 2)
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - altura) // 2
+        # Centro exato da janela inteira (com barra de título), igual aos avisos padrão
+        # (ver _abrir_aviso_no_centro).
+        esquerda, topo, direita, baixo = _retangulo_janela(self.root)
+        x = (esquerda + direita - largura) // 2
+        y = (topo + baixo - altura) // 2
         toast.geometry(f'{largura}x{altura}+{x}+{y}')
         toast.after(1300, toast.destroy)
+
+    def _ao_redimensionar_janela(self, evento):
+        tamanho = (evento.width, evento.height)
+        if tamanho == self._tamanho_janela:
+            return  # só moveu a janela
+        primeira_vez = self._tamanho_janela is None
+        self._tamanho_janela = tamanho
+        if primeira_vez:
+            return
+        self.canvas.itemconfigure(self._id_frame_interno, state='hidden')
+        if self._reexibir_pedidos is not None:
+            self.root.after_cancel(self._reexibir_pedidos)
+        self._reexibir_pedidos = self.root.after(150, self._mostrar_pedidos)
+
+    def _mostrar_pedidos(self):
+        self._reexibir_pedidos = None
+        self.canvas.itemconfigure(self._id_frame_interno, state='normal')
 
     def _corrigir_posicao_inicial(self):
         self.root.update_idletasks()
@@ -1348,8 +1669,12 @@ class Janela:
         self.canvas.yview_scroll(direcao * 3, 'units')
 
     def adicionar_pedido(self):
-        bloco = BlocoPedido(self.frame_interno, on_remover=self._remover_bloco, numero=len(self.blocos) + 1)
+        bloco = BlocoPedido(
+            self.frame_interno, on_remover=self._remover_bloco, numero=len(self.blocos) + 1,
+            on_mudar_vigencia_ntp=self._atualizar_disponibilidade_ntp,
+        )
         self.blocos.append(bloco)
+        self._atualizar_disponibilidade_ntp()
         # update_idletasks() (do root, não só do frame_interno) garante que a largura do
         # canvas já esteja sincronizada (ver _ao_redimensionar_canvas) antes de medir a
         # altura real do conteúdo.
@@ -1364,6 +1689,12 @@ class Janela:
             self.blocos.remove(bloco)
         for i, b in enumerate(self.blocos, start=1):
             b._rotulo_titulo.configure(text=f"Pedido {i}")
+        self._atualizar_disponibilidade_ntp()
+
+    def _atualizar_disponibilidade_ntp(self):
+        disponivel = any(b.libera_ntp() for b in self.blocos)
+        for b in self.blocos:
+            b.definir_ntp_disponivel(disponivel)
 
     # ── Limpar tudo ───────────────────────────────────────────────────────────
 

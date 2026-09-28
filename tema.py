@@ -72,6 +72,9 @@ def aplicar(root) -> "ttkbootstrap.Style":
         "TituloCartaoInterno.TLabel", foreground=COR_PRIMARIA, background=COR_FUNDO,
         font=("Segoe UI", 11, "bold"),
     )
+    # Card = um único ttk.Frame (ver _criar_cartao em interface.py). Sem borda visível, igual
+    # ao que a 1.3.0 mostrava na prática (a moldura de COR_BORDA de lá nunca chegava a aparecer).
+    estilo.configure("Cartao.TFrame", background=COR_FUNDO, relief='flat', borderwidth=1)
     estilo.configure("Ajuda.TLabel", foreground=COR_AJUDA, font=("Segoe UI", 9))
     estilo.configure("Aviso.TLabel", foreground=COR_AVISO, font=("Segoe UI", 9))
     estilo.configure("Titulo.TLabel", foreground=COR_PRIMARIA, background=COR_FUNDO_SUAVE, font=("Segoe UI", 16, "bold"))

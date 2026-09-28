@@ -4,7 +4,34 @@ from validacao import (
     validar_quantidade, validar_especies, limite_especies_excedido, limitar_especies,
     validar_itens_duplicados, especie_unica_travada, beneficio_subsidiario_pode_herdar_do_principal,
     validar_beneficios_subsidiaria, tese_permite_subsidiario,
+    tese_permite_indice_singular, tese_permite_exclusao_ntp, vigencia_libera_ntp,
 )
+from teses import TESES
+
+
+class TestTesePermiteIndiceSingular:
+    NAO_APLICAVEIS = {
+        'contestacao_administrativa', 'prescricao_quinquenal', 'cat_nao_vinculada',
+        'erro_massa_salarial', 'erro_vinculos', 'rotatividade',
+        # sem "índice do FAP" variável: custo cessado fala em "índice de custo", e erro de
+        # implantação já usa sempre o singular
+        'custo_cessado', 'erro_implantacao',
+    }
+
+    @pytest.mark.parametrize('tese_key', sorted(TESES))
+    def test_aplicabilidade(self, tese_key):
+        assert tese_permite_indice_singular(tese_key) is (tese_key not in self.NAO_APLICAVEIS)
+
+
+class TestTesePermiteExclusaoNtp:
+    NAO_APLICAVEIS = {
+        'contestacao_administrativa', 'prescricao_quinquenal', 'cat_nao_vinculada', 'custo_cessado',
+        'ntp_duplicado', 'cat_duplicada', 'erro_massa_salarial', 'erro_vinculos', 'rotatividade',
+    }
+
+    @pytest.mark.parametrize('tese_key', sorted(TESES))
+    def test_aplicabilidade(self, tese_key):
+        assert tese_permite_exclusao_ntp(tese_key) is (tese_key not in self.NAO_APLICAVEIS)
 
 
 class TestTesePermiteSubsidiario:
@@ -138,3 +165,13 @@ class TestValidarBeneficiosSubsidiaria:
 
     def test_sem_quantidade_principal_nao_bloqueia_por_limite(self):
         validar_beneficios_subsidiaria([('B91', '1'), ('B91', '2')], quantidade_principal=None)
+
+
+class TestVigenciaLiberaNtp:
+    @pytest.mark.parametrize('texto', ['2016', '2017', '2015, 2016', '2016 e 2018', '2019, 2010'])
+    def test_alguma_vigencia_ate_2017(self, texto):
+        assert vigencia_libera_ntp(texto) is True
+
+    @pytest.mark.parametrize('texto', ['2018', '2020, 2021', '', None, 'xxxx', '17'])
+    def test_nenhuma_vigencia_ate_2017(self, texto):
+        assert vigencia_libera_ntp(texto) is False

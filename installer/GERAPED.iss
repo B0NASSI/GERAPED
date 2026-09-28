@@ -1,5 +1,5 @@
 #define MyAppName "GERAPED — Gerador de Pedidos"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "Rodriguez & Sousa Advogados Associados"
 #define MyAppExeName "GERAPED Launcher.exe"
 #define SourceDir "..\GERAPED - Instalador"
