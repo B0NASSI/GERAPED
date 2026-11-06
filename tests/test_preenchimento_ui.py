@@ -198,3 +198,28 @@ def test_ctrl_l_abre_o_log_da_peticao_carregada(janela, peticao_docx, monkeypatc
     janela.root.event_generate('<Control-l>')
     janela.root.update()
     assert abertos == [str(janela._arquivo_analise)]
+
+
+def test_plural_da_contestacao_marca_sozinha_com_mais_de_uma_vigencia(janela):
+    _limpar(janela)
+    b = janela.blocos[0]
+    b.combo_tese.set('CONTESTAÇÃO ADMINISTRATIVA')
+    b._atualizar_parametro()
+    janela.root.update()
+
+    def digitar(texto):
+        b.combo_parametro.delete(0, 'end')
+        b.combo_parametro.insert(0, texto)
+        b.combo_parametro.focus_force()                         # evento de teclado vai para o widget com foco
+        b.combo_parametro.event_generate('<KeyRelease>')
+        janela.root.update()
+    digitar('2017')
+    assert b.var_varios_estabelecimentos.get() is False
+    digitar('2017, 2019')
+    assert b.var_varios_estabelecimentos.get() is True           # mais de uma vigência: "Plural" marcada
+    digitar('2017')
+    assert b.var_varios_estabelecimentos.get() is False          # voltou a uma só: desmarca (foi ela que marcou)
+    b.var_varios_estabelecimentos.set(True)                      # marcada à mão (vários CNPJs): não desmarca sozinha
+    digitar('2017, 2019')
+    digitar('2017')
+    assert b.var_varios_estabelecimentos.get() is True

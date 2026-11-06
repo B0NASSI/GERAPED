@@ -283,6 +283,10 @@ def _montar_principal(n, d, sec, beneficios, notas, anteriores=()):
             pend.append('Vigências não encontradas na tabela: preencher o campo de vigência.')
         varios = len(cnpjs) > 1 and ('motivo_fixo_varios_estabelecimentos' in tese
                                      or tipo == 'correcao_com_vigencia')
+        # CONTESTAÇÃO ADMINISTRATIVA: mais de uma vigência também pede o plural ("às contestações administrativas"),
+        # mesmo com um único CNPJ (regra do escritório; petições reais: 4 de 5 casos assim usam o plural)
+        if len(anos) > 1 and 'motivo_fixo_varios_estabelecimentos' in tese:
+            varios = True
     elif tipo == 'fixo':                                   # rotatividade
         quantidade, especies = max(1, len(cnpjs)), []
         if not cnpjs:
@@ -357,7 +361,7 @@ def _montar_principal(n, d, sec, beneficios, notas, anteriores=()):
     logica.append(f'Tipo de cláusula: {tipo}.')
     if tipo in ('fixo_com_vigencia', 'correcao_com_vigencia'):
         logica.append(f'Pedido por vigência: vigências lidas da tabela = {campo_texto or "nenhuma"}; CNPJs distintos = '
-                      f'{len(cnpjs)} -> "mais de um estabelecimento" = {varios}.')
+                      f'{len(cnpjs)} -> plural ("mais de um estabelecimento"/"mais de uma vigência") = {varios}.')
     elif tipo == 'fixo':
         logica.append(f'Quantidade = nº de CNPJs distintos na tabela ({len(cnpjs)}).')
     else:

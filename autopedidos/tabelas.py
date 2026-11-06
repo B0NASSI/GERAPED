@@ -24,7 +24,8 @@ TESES_POR_VIGENCIA = {'fixo', 'fixo_com_vigencia', 'correcao_com_vigencia'}
 # Dimensões medidas nas 342 tabelas de pedido das 52 petições reais (valores mais frequentes):
 # largura (twips) por TIPO de coluna; a tabela padrão de 5 colunas soma 4.905 (a mais comum).
 LARGURAS = {'item': 510, 'vigencia': 1134, 'cnpj': 1560, 'tipo': 567, 'beneficio': 1134, 'indices': 2154,
-            'competencias': 1814, 'ntp': 545, 'dib': 1134, 'dcb': 1134}
+            'competencias': 1814, 'ntp': 545, 'dib': 1134, 'dcb': 1134,
+            'ntp_beneficio': 1400}      # "NTP do benefício": cabeçalho e número de 10 dígitos cabem em UMA linha
 ALTURA_CABECALHO = 567        # twips, altura mínima da linha do cabeçalho (1,0 cm)
 ALTURA_LINHA = 397            # twips, altura mínima das linhas do corpo (0,7 cm)
 # Pedido de 60 dias: a coluna "Índices" aparece, mas FICA EM BRANCO por enquanto (decisão do usuário):
@@ -57,6 +58,8 @@ def _larguras(rotulos, n_vig=1):
         if n.startswith('vigenc'):
             base = LARGURAS['vigencia'] // n_vig
             out.append(base)
+        elif n.startswith('ntp do'):       # "NTP do benefício" (o NÚMERO do NTP) não pode cair na largura estreita da coluna "NTP"
+            out.append(LARGURAS['ntp_beneficio'])
         else:
             out.append(next((w for k, w in LARGURAS.items() if n.startswith(k[:6])), LARGURAS['cnpj']))
     if n_vig > 1:                      # resto da divisão vai para a última sub-coluna
@@ -88,9 +91,12 @@ def _celulas_vigencia(vigs, n_vig):
     return list(vigs) + [None] * (n_vig - len(vigs))
 
 
-def _montar(n_vig, resto, linhas):
-    """Cabeçalho padrão: Item | Vigência(s) do FAP (1 ou n colunas, cabeçalho mesclado) | resto..."""
-    cab = [('Item', 1), ('Vigência do FAP' if n_vig == 1 else 'Vigências do FAP', n_vig)] + [(r, 1) for r in resto]
+def _montar(n_vig, resto, linhas, varias_vigencias=False):
+    """Cabeçalho padrão: Item | Vigência(s) do FAP (1 ou n colunas, cabeçalho mesclado) | resto...
+    `varias_vigencias`: a tabela traz mais de uma vigência (ex.: uma por linha) -> "Vigências do FAP", como nas
+    petições reais (nas tabelas só de vigência, 11 de 14 com várias vigências usam o plural)."""
+    plural = n_vig > 1 or varias_vigencias
+    cab = [('Item', 1), ('Vigências do FAP' if plural else 'Vigência do FAP', n_vig)] + [(r, 1) for r in resto]
     rotulos = ['Item'] + ['Vigência'] * n_vig + list(resto)
     return TabelaPedido(cabecalho=cab, linhas=linhas, larguras=_larguras(rotulos, n_vig))
 
@@ -189,7 +195,8 @@ def tabela_por_vigencia(secao):
         if comp is not None:
             linha.append(comp)
         linhas.append(linha)
-    return _montar(n_vig, ['CNPJ'] + (['Competências'] if com_competencias else []), linhas)
+    return _montar(n_vig, ['CNPJ'] + (['Competências'] if com_competencias else []), linhas,
+                   varias_vigencias=len({a for _, vg, _ in dados for a in vg}) > 1)
 
 
 def _eh_matriz(cab):

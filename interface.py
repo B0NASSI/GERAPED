@@ -1210,9 +1210,16 @@ class BlocoPedido:
         if nome_para_chave(self.combo_tese.get()) == TESE_QUE_LIBERA_NTP and self.combo_parametro is not None:
             self.combo_parametro.bind('<KeyRelease>', lambda e: self._on_mudar_vigencia_ntp())
         self.var_varios_estabelecimentos.set(False)
+        self._plural_automatico = False
+        if nome_para_chave(self.combo_tese.get()) == 'contestacao_administrativa' and self.combo_parametro is not None:
+            # mais de uma vigência digitada marca "Plural" sozinha (e desmarca ao voltar a uma só, se foi ela que marcou)
+            self.combo_parametro.bind('<KeyRelease>', lambda e: self._plural_pelas_vigencias(), add='+')
         if self._varios_estabelecimentos_aplicavel():
             CaixaSelecao(
-                self.frame_parametro, text="Mais de um estabelecimento", variable=self.var_varios_estabelecimentos,
+                self.frame_parametro,
+                text=("Mais de um estab./vigência" if nome_para_chave(self.combo_tese.get()) == 'contestacao_administrativa'
+                      else "Mais de um estabelecimento"),
+                variable=self.var_varios_estabelecimentos,
             ).pack(side='left', padx=(16, 0))
         # Teses sem campo extra não reservam a linha (some o espaço em branco e "Item do
         # pedido" sobe, ficando logo abaixo de "Tese principal").
@@ -1222,6 +1229,16 @@ class BlocoPedido:
         else:
             self.label_parametro.grid(row=3, column=0, sticky='w', pady=(8, 4))
             self.frame_parametro.grid(row=3, column=1, sticky='we', pady=(8, 4))
+
+    def _plural_pelas_vigencias(self):
+        """CONTESTAÇÃO ADMINISTRATIVA: mais de uma vigência no campo => caixa "Plural" marcada automaticamente."""
+        anos = set(re.findall(r'(?:19|20)\d{2}', self.combo_parametro.get()))
+        if len(anos) > 1 and not self.var_varios_estabelecimentos.get():
+            self.var_varios_estabelecimentos.set(True)
+            self._plural_automatico = True
+        elif len(anos) <= 1 and self._plural_automatico:
+            self.var_varios_estabelecimentos.set(False)
+            self._plural_automatico = False
 
     def _atualizar_estado_especies(self):
         """Some a linha "Espécie(s)" inteira (rótulo + campo) quando a tese selecionada não
@@ -2182,6 +2199,7 @@ class Janela:
         sb.configure(command=txt.yview)
         txt.pack(side='left', fill='both', expand=True)
         txt.tag_configure('titulo_secao', font=fonte_titulo_secao)
+        txt.tag_configure('aviso', font=fonte_titulo_secao)       # parágrafo do alerta "CONFIRA SEMPRE" em negrito
 
         def renderizar(_event=None):
             largura_px = int((txt.winfo_width() - 20) * 0.90)
@@ -2197,9 +2215,14 @@ class Janela:
                 elif tipo == 'titulo':
                     txt.insert('end', conteudo + '\n', 'titulo_secao')
                 else:
+                    aviso = conteudo.lstrip().startswith('ATENÇÃO: CONFIRA SEMPRE')
+                    fonte_do_bloco = fonte_titulo_secao if aviso else fonte_manual
                     for prefixo, paragrafo in (item for bloco in _preparar_paragrafos_notas(conteudo) for item in bloco):
-                        linhas = _justificar_paragrafo(prefixo, paragrafo, fonte_manual, largura_px)
-                        txt.insert('end', '\n'.join(linhas) + '\n')
+                        linhas = _justificar_paragrafo(prefixo, paragrafo, fonte_do_bloco, largura_px)
+                        if aviso:
+                            txt.insert('end', '\n'.join(linhas) + '\n', 'aviso')
+                        else:
+                            txt.insert('end', '\n'.join(linhas) + '\n')
             txt.config(state='disabled')
 
         txt.bind('<Configure>', renderizar)

@@ -187,8 +187,21 @@ def test_tabela_do_pedido_beneficios_vigencias_duplas_e_prescricao(tmp_path):
     assert t1.larguras == [510, 567, 567, 1560, 567, 1134]          # as 2 sub-colunas somam 1 coluna (1134)
     assert prop.pedidos[0].dados['indice_singular'] is False and prop.pedidos[0].dados['quantidade'] == 1
     t2 = tabela_do_pedido(prop.pedidos[1])
-    assert [t for t, _ in t2.cabecalho] == ['Item', 'Vigência do FAP', 'CNPJ', 'Competências']
+    # tabela só de vigência com 2 vigências (uma por linha): cabeçalho no plural, como nas petições reais
+    assert [t for t, _ in t2.cabecalho] == ['Item', 'Vigências do FAP', 'CNPJ', 'Competências']
     assert t2.linhas[1] == ['2', '2023', CNPJ, 'De 01/2023 a 12/2023']
+
+
+def test_tabela_so_de_vigencia_usa_singular_com_uma_vigencia_e_plural_com_varias(tmp_path):
+    from autopedidos.tabelas import tabela_do_pedido
+
+    def cabecalho(linhas):
+        p = _peticao(tmp_path, [('h', 1, 'CONTESTAÇÃO ADMINISTRATIVA, EFEITO SUSPENSIVO E PRAZO PRESCRICIONAL'),
+                                ('tab', ['Item', 'Vigência do FAP', 'CNPJ'], linhas)])
+        prop = montar_pedidos(p, DetectorRegras().detectar(p))
+        return [c for c, _ in tabela_do_pedido(prop.pedidos[0]).cabecalho][1]
+    assert cabecalho([['1', '2017', CNPJ]]) == 'Vigência do FAP'
+    assert cabecalho([['1', '2017', CNPJ], ['2', '2019', CNPJ], ['3', '2020', CNPJ], ['4', '2021', CNPJ]]) == 'Vigências do FAP'
 
 
 def test_celula_com_dois_anos_vira_duas_colunas_de_vigencia(tmp_path):
@@ -372,7 +385,7 @@ def test_cat_nao_vinculada_usa_o_cabecalho_ntp_do_beneficio():
     """Na tese CAT NÃO VINCULADA o número da coluna é o do NTP: cabeçalho "NTP do benefício"."""
     from types import SimpleNamespace
     from autopedidos.beneficios import Beneficio
-    from autopedidos.tabelas import n_beneficios_na_tabela, tabela_do_pedido
+    from autopedidos.tabelas import LARGURAS, n_beneficios_na_tabela, tabela_do_pedido
     b = Beneficio(numero='6030880156', especie='B91', vigencias={'2017'}, cnpjs={'04368898000100'})
     b.linhas = [{'item': '1', 'vigs': ['2017'], 'cnpj': '04.368.898/0001-00', 'tipo': 'B91',
                  'beneficio': b.numero, 'indices': '', 'bt': False}]
@@ -384,6 +397,10 @@ def test_cat_nao_vinculada_usa_o_cabecalho_ntp_do_beneficio():
     assert n_beneficios_na_tabela(t) == 1
     assert [c for c, _ in tabela_do_pedido(pedido('ntp_duplicado')).cabecalho][-1] == 'NTP do benefício'
     assert [c for c, _ in tabela_do_pedido(pedido('cat_duplicada')).cabecalho][-1] == 'Benefício'
+    # a coluna "NTP do benefício" é larga (cabeçalho e número de 10 dígitos numa linha só); antes caía na largura
+    # estreita da coluna "NTP" e o número quebrava em 3 linhas
+    larguras = dict(zip([c for c, _ in t.cabecalho], t.larguras))
+    assert larguras['NTP do benefício'] == LARGURAS['ntp_beneficio'] > LARGURAS['beneficio']
 
 
 def test_tese_de_ntp_le_tabela_sem_coluna_tipo():
@@ -400,3 +417,19 @@ def test_tese_de_ntp_le_tabela_sem_coluna_tipo():
     bs = ler_beneficios(t, sem_especie=True)
     assert [b.numero for b in bs] == ['6051566581', '6051566582', '6051566583']
     assert all(b.especie == '' for b in bs)
+
+
+def test_contestacao_com_varias_vigencias_usa_plural_mesmo_com_um_cnpj(tmp_path):
+    """"às contestações administrativas" quando a tabela traz mais de uma vigência, mesmo com um único CNPJ."""
+    def pedido(linhas):
+        p = _peticao(tmp_path, [('h', 1, 'CONTESTAÇÃO ADMINISTRATIVA, EFEITO SUSPENSIVO E PRAZO PRESCRICIONAL'),
+                                ('tab', ['Item', 'Vigência do FAP', 'CNPJ'], linhas)])
+        return montar_pedidos(p, DetectorRegras().detectar(p)).pedidos[0]
+    uma = pedido([['1', '2017', CNPJ]])
+    varias = pedido([['1', '2017', CNPJ], ['2', '2019', CNPJ], ['3', '2020', CNPJ], ['4', '2021', CNPJ]])
+    assert uma.dados['varios_estabelecimentos'] is False
+    assert varias.dados['varios_estabelecimentos'] is True
+    from autopedidos.gerapedvendor import gerador_pedido
+    texto = lambda p: ' '.join(x.text for x in gerador_pedido.gerar_documento([p.dados]).paragraphs)
+    assert 'atribuído à contestação administrativa' in texto(uma)
+    assert 'atribuído às contestações administrativas' in texto(varias)
