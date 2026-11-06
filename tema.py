@@ -10,7 +10,7 @@ from ttkbootstrap.style import ThemeDefinition
 
 NOME_TEMA = "requerid"
 
-COR_PRIMARIA = "#2D315F"        # azul-marinho (barra lateral, títulos)
+COR_PRIMARIA = "#071233"        # azul-marinho (barra lateral, títulos)
 COR_SECUNDARIA = "#D3782A"      # laranja (ação principal)
 COR_FUNDO = "#FFFFFF"
 COR_FUNDO_SUAVE = "#EEF0F5"     # botões secundários "macios", caixa de resultado
@@ -20,20 +20,21 @@ COR_SUCESSO = "#1F7A4D"
 COR_ERRO = "#C00000"
 COR_AJUDA = "#6B7085"           # cinza-azulado: legendas de ajuda, sem disputar com o laranja da ação principal
 COR_AVISO = "#8A5A00"           # âmbar escuro: avisos de verdade (com ⚠), distinto do laranja de "clique aqui"
+COR_INFO = "#3B82C4"            # azul de informação
 
-COR_NAV_ATIVO = "#3B4070"       # item selecionado / hover na barra lateral
+COR_NAV_ATIVO = "#1B2A52"       # item selecionado / hover na barra lateral
 COR_NAV_TEXTO = "#C9CCE0"       # texto dos itens não selecionados
 COR_NAV_ICONE = "#7FA8FF"       # azul mais vivo (céu) para o ícone do rodapé da sidebar -
                                  # dá um ponto de cor num canto que, só com COR_NAV_TEXTO em
                                  # tudo, ficava monocromático/apagado
-COR_NAV_DIVISOR = "#454A7D"     # linha sutil acima do rodapé da sidebar, mais clara que o
+COR_NAV_DIVISOR = "#2C3A66"     # linha sutil acima do rodapé da sidebar, mais clara que o
                                  # fundo mas sem chamar tanta atenção quanto o laranja
 
 CORES = {
     "primary": COR_PRIMARIA,
     "secondary": COR_SECUNDARIA,
     "success": COR_SUCESSO,
-    "info": "#3B82C4",
+    "info": COR_INFO,
     "warning": COR_AVISO,
     "danger": COR_ERRO,
     "light": COR_FUNDO_SUAVE,
@@ -45,7 +46,7 @@ CORES = {
     "border": "#D5D9E5",
     "inputfg": COR_TEXTO,
     "inputbg": "#FFFFFF",
-    "active": "#3B4070",
+    "active": COR_NAV_ATIVO,
 }
 
 TEMA = ThemeDefinition(name=NOME_TEMA, colors=CORES, themetype="light")

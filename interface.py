@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import os
 import re
@@ -13,7 +14,7 @@ from ttkbootstrap.style import Colors
 
 import tema
 from teses import TESES, TIPO_BENEFICIO_POR_ESPECIE, nome_para_chave, PARAMETROS_TESE, chave_para_opcao_parametro
-from gerador_pedido import gerar_documento, COR_ITEM_PETICAO
+from gerador_pedido import gerar_documento, COR_ITEM_PETICAO, _grupo_ja_coberto
 from validacao import (
     validar_quantidade, validar_especies, limite_especies_excedido, limitar_especies,
     validar_itens_duplicados, especie_unica_travada, beneficio_subsidiario_pode_herdar_do_principal,
@@ -21,6 +22,8 @@ from validacao import (
     tese_permite_indice_singular, tese_permite_exclusao_ntp, TESE_QUE_LIBERA_NTP, vigencia_libera_ntp,
 )
 from preferencias import ordenar_chaves_teses, ordenar_nomes_teses, salvar_ordem_teses, ordem_padrao_chaves
+
+logger = logging.getLogger(__name__)
 
 ESPECIES = list(TIPO_BENEFICIO_POR_ESPECIE.keys())
 ESPECIES_SUBSIDIARIA = ['B91', 'B92', 'B93', 'B94']
@@ -145,6 +148,52 @@ petição inicial:
 Use "+ Adicionar pedido" para montar vários pedidos de uma vez -
 todos entram no mesmo documento Word, na ordem em que aparecem
 na tela.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CARREGAR PETIÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Carregar petição" lê a petição inicial (.docx) e preenche os
+pedidos sozinho: tese, item, quantidade, espécie(s) e tabela. A
+leitura é feita no seu computador, nada é enviado para fora.
+
+  1. Clique em "Carregar petição" e escolha o arquivo .docx
+  2. Leia a janela "Petição carregada": ela mostra o que precisa
+     de conferência
+  3. Confira cada pedido na tela e ajuste o que for preciso
+  4. Clique em "Gerar Word"
+
+O programa grava um LOG de cada petição carregada, com o porquê de
+cada tese e de cada decisão. Para abri-lo, aperte CTRL+L (sem petição
+carregada, abre a pasta dos logs). Útil para investigar um pedido
+estranho.
+
+ATENÇÃO: CONFIRA SEMPRE. O programa é um auxílio e pode errar;
+não confie cegamente nele. Revise todos os pedidos (tese, item,
+quantidade, espécies e tabela) contra a petição antes de gerar o
+Word. A responsabilidade pela conferência é sua.
+
+O programa sugere, você decide: nada é gerado sem o seu clique.
+
+O nome da petição carregada fica no alto da tela. O botão
+"Rever apontamentos" ao lado dele reabre a janela de conferência
+quando você quiser.
+
+A tabela de cada pedido vai junto no Word. Para tirá-la de um
+pedido, desmarque "Incluir a tabela do pedido".
+
+Na janela de conferência:
+  - "Precisa da sua atenção": pedidos com pendência (ex.: tese com
+    baixa confiança, parâmetro a escolher, vigência não encontrada)
+  - "Seções não classificadas": o programa não reconheceu a tese;
+    se houver pedido, adicione à mão
+  - "Também aparecem no texto": teses citadas no corpo da petição
+    sem uma seção própria; só confira se faltou algum pedido
+
+ATENÇÃO: as teses ERRO DE MASSA SALARIAL e ERRO DE VÍNCULOS ainda
+estão em construção e podem apresentar erros. Confira esses pedidos
+com cuidado.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -418,9 +467,22 @@ def _retangulo_monitor_atual(root):
         return None
 
 
-def _centralizar_janela(janela, root, largura, altura):
+def _aplicar_identidade(janela):
+    """Janelas filhas (Toplevel) com o ícone do GERAPED (senão o Windows mostra o ícone padrão do Tk)."""
+    try:
+        janela.iconbitmap(_caminho_recurso('icone.ico'))
+    except tk.TclError:
+        pass
+
+
+# janelas de apoio (conferência da petição, manual, notas) abrem um pouco à direita do centro, sempre no mesmo lugar
+DESLOCAMENTO_JANELAS = 110
+
+
+def _centralizar_janela(janela, root, largura, altura, deslocamento=0):
     janela.update_idletasks()
-    x = root.winfo_x() + (root.winfo_width() - largura) // 2
+    _aplicar_identidade(janela)
+    x = root.winfo_x() + (root.winfo_width() - largura) // 2 + deslocamento
     y = root.winfo_y() + (root.winfo_height() - altura) // 2
     # Evita que a janela fique cortada quando a janela principal está pequena
     # ou próxima da borda da tela (ex: com apenas 1 pedido, root fica bem baixo).
@@ -606,23 +668,42 @@ def _mostrar_preview(root, doc, ao_salvar):
     txt.tag_configure('bold_italic', font=('Segoe UI', 10, 'bold italic'))
     txt.tag_configure('cor_item', foreground=f'#{COR_ITEM_PETICAO}')
 
-    paragrafos = [p for p in doc.paragraphs if p.text.strip()]
-    for i, paragrafo in enumerate(paragrafos):
-        for run in paragrafo.runs:
-            if not run.text:
-                continue
-            tags = []
-            if run.bold and run.italic:
-                tags.append('bold_italic')
-            elif run.bold:
-                tags.append('bold')
-            elif run.italic:
-                tags.append('italic')
-            if _cor_run(run) == str(COR_ITEM_PETICAO):
-                tags.append('cor_item')
-            txt.insert('end', run.text, tuple(tags))
-        if i < len(paragrafos) - 1:
-            txt.insert('end', '\n\n')
+    txt.tag_configure('tabela', font=('Consolas', 9), lmargin1=30, lmargin2=30, foreground='#444444')
+    # percorre o corpo na ordem: parágrafos do pedido e (se houver) a tabela que vem logo depois
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    blocos = []
+    for el in doc.element.body:
+        if el.tag.endswith('}p'):
+            par = Paragraph(el, doc._body)
+            if par.text.strip():
+                blocos.append(par)
+        elif el.tag.endswith('}tbl'):
+            blocos.append(Table(el, doc._body))
+    for i, bloco in enumerate(blocos):
+        if isinstance(bloco, Table):
+            for linha in bloco.rows:
+                celulas = []
+                for c in linha.cells:
+                    if not celulas or c.text != celulas[-1] or not c.text:
+                        celulas.append(c.text)
+                txt.insert('end', '  ' + '  |  '.join(celulas) + '\n', ('tabela',))
+        else:
+            for run in bloco.runs:
+                if not run.text:
+                    continue
+                tags = []
+                if run.bold and run.italic:
+                    tags.append('bold_italic')
+                elif run.bold:
+                    tags.append('bold')
+                elif run.italic:
+                    tags.append('italic')
+                if _cor_run(run) == str(COR_ITEM_PETICAO):
+                    tags.append('cor_item')
+                txt.insert('end', run.text, tuple(tags))
+        if i < len(blocos) - 1:
+            txt.insert('end', '\n' if isinstance(bloco, Table) else '\n\n')
 
     txt.config(state='disabled')
 
@@ -846,8 +927,10 @@ class LinhaBeneficio:
 
 
 class GrupoSubsidiario:
-    def __init__(self, parent, on_remover, numero=1, obter_especie_travada=None, antes=None):
+    def __init__(self, parent, on_remover, numero=1, obter_especie_travada=None, antes=None, on_mudar=None):
         self.on_remover = on_remover
+        # avisa o BlocoPedido quando os benefícios do grupo mudam (para reclassificar subsidiária x alternativa)
+        self._on_mudar = on_mudar or (lambda: None)
         # Consultado a cada novo benefício adicionado, para travar a espécie na mesma da
         # tese principal quando esta citar uma só espécie (ver BlocoPedido).
         self.obter_especie_travada = obter_especie_travada or (lambda: None)
@@ -858,6 +941,10 @@ class GrupoSubsidiario:
 
         self._casca, self.frame, self._rotulo_titulo = _criar_cartao(parent, f"Tese subsidiária {numero}", padding=12)
         self._casca.pack(fill='x', expand=True, pady=(0, 8), before=antes)
+        # Papel desta tese no pedido: SUBSIDIÁRIA ou ALTERNATIVA (título + frase explicativa, sempre visíveis)
+        self._cor_titulo = str(self._rotulo_titulo.cget('foreground'))
+        self._rotulo_papel = _rotulo(self.frame, '', ajuda=True, wraplength=560, justify='left')
+        self._rotulo_papel.pack(anchor='w', pady=(0, 8))
 
         linha = _quadro(self.frame)
         linha.pack(fill='x', anchor='w')
@@ -903,10 +990,41 @@ class GrupoSubsidiario:
             especie_travada=self.obter_especie_travada(), antes=self._rodape,
         )
         self.linhas_beneficio.append(linha)
+        linha.entry_numero.bind('<KeyRelease>', lambda e: self._on_mudar(), add='+')
+        linha.var_especie.trace_add('write', lambda *a: self._on_mudar())
+        self._on_mudar()
 
     def _remover_linha_beneficio(self, linha):
         if linha in self.linhas_beneficio:
             self.linhas_beneficio.remove(linha)
+        self._on_mudar()
+
+    def dados_para_classificacao(self):
+        """Benefícios deste grupo como o gerador os veria (sem validar): sem nenhuma linha = TODOS os
+        benefícios do pedido principal."""
+        numeros = []
+        for linha in self.linhas_beneficio:
+            especie, numero = linha.var_especie.get(), linha.entry_numero.get().strip()
+            if especie and numero:
+                numeros.append((especie, numero))
+        return {'todos_beneficios_principal': not self.linhas_beneficio, 'numeros_com_especie': numeros}
+
+    def definir_papel(self, alternativa, posicao):
+        """Mostra no cartão se esta tese é SUBSIDIÁRIA ou ALTERNATIVA (regra do escritório: "Subsidiariamente"
+        só no começo; as demais teses de um benefício já citado são "ou, alternativamente")."""
+        if alternativa:
+            self._rotulo_titulo.configure(text=f"Tese alternativa {posicao}  ·  \"ou, alternativamente\"",
+                                          foreground=tema.COR_SECUNDARIA)
+            self._rotulo_papel.configure(text='ALTERNATIVA: fala de benefício(s) já citado(s) em uma tese anterior. '
+                                              'No Word entra como "– ou, alternativamente, ...".')
+        else:
+            self._rotulo_titulo.configure(text=f"Tese subsidiária {posicao}", foreground=self._cor_titulo)
+            if posicao == 1:
+                self._rotulo_papel.configure(text='SUBSIDIÁRIA: abre a parte "Subsidiariamente, não sendo esse o '
+                                                  'entendimento de V. Exa., ..." do pedido.')
+            else:
+                self._rotulo_papel.configure(text='SUBSIDIÁRIA (benefício ainda não citado): entra encadeada às '
+                                                  'anteriores, sem "ou, alternativamente".')
 
     def atualizar_travamento_especie(self):
         especie_travada = self.obter_especie_travada()
@@ -1077,6 +1195,14 @@ class BlocoPedido:
             row=8, column=0, columnspan=2, sticky='e',
         )
 
+        # ── Integração com a leitura da petição (AutoPedidos) ──────────────────────────────
+        # `proposto` = PedidoProposto que originou este bloco (None se preenchido à mão). Só ele
+        # carrega a tabela do pedido; a caixa só aparece quando há tabela para incluir.
+        self.proposto = None
+        self.var_tabela = tk.BooleanVar(value=True)
+        self.check_tabela = CaixaSelecao(
+            self.frame, text="Incluir a tabela do pedido (lida da petição)", variable=self.var_tabela,
+        )
     def _atualizar_parametro(self):
         self.combo_parametro = _reconstruir_combo_parametro(
             self.frame_parametro, self.combo_tese, label_widget=self.label_parametro,
@@ -1153,7 +1279,9 @@ class BlocoPedido:
 
     def _varios_estabelecimentos_aplicavel(self):
         tese = TESES.get(nome_para_chave(self.combo_tese.get()))
-        return bool(tese and 'motivo_fixo_varios_estabelecimentos' in tese)
+        # contestação (motivo próprio) e correção de massa salarial/vínculos ("dos estabelecimentos")
+        return bool(tese and ('motivo_fixo_varios_estabelecimentos' in tese
+                              or tese.get('tipo_clausula') == 'correcao_com_vigencia'))
 
     def libera_ntp(self):
         if nome_para_chave(self.combo_tese.get()) != TESE_QUE_LIBERA_NTP or self.combo_parametro is None:
@@ -1249,8 +1377,22 @@ class BlocoPedido:
         grupo = GrupoSubsidiario(
             self.frame_subsidiario, on_remover=self._remover_grupo_subsidiario, numero=len(self.grupos_subsidiarios) + 1,
             obter_especie_travada=self._especie_unica_travada, antes=self._botao_adicionar_subsidiaria,
+            on_mudar=self.atualizar_papeis_subsidiarias,
         )
         self.grupos_subsidiarios.append(grupo)
+        self.atualizar_papeis_subsidiarias()
+
+    def atualizar_papeis_subsidiarias(self):
+        """Marca cada tese como SUBSIDIÁRIA ou ALTERNATIVA, pela mesma regra do texto do Word
+        (gerador_pedido._grupo_ja_coberto): benefício já citado em tese anterior = alternativa."""
+        vistos, todos_visto = set(), False
+        for i, grupo in enumerate(self.grupos_subsidiarios):
+            dados = grupo.dados_para_classificacao()
+            grupo.definir_papel(i > 0 and _grupo_ja_coberto(dados, vistos, todos_visto), i + 1)
+            if dados['todos_beneficios_principal']:
+                todos_visto = True
+            else:
+                vistos |= set(dados['numeros_com_especie'])
 
     def _especie_unica_travada(self):
         especies = [e for e in ESPECIES if self.vars_especies[e].get()]
@@ -1263,8 +1405,7 @@ class BlocoPedido:
     def _remover_grupo_subsidiario(self, grupo):
         if grupo in self.grupos_subsidiarios:
             self.grupos_subsidiarios.remove(grupo)
-        for i, g in enumerate(self.grupos_subsidiarios, start=1):
-            g._rotulo_titulo.configure(text=f"Tese subsidiária {i}")
+        self.atualizar_papeis_subsidiarias()
 
     def _remover(self):
         if not _confirmar(
@@ -1275,6 +1416,22 @@ class BlocoPedido:
             return
         self._casca.destroy()
         self.on_remover(self)
+
+    # ── Preenchimento a partir da petição (ver preenchimento.py) ─────────────────────────
+
+    def preencher(self, proposto):
+        """Preenche TODOS os campos do bloco com um PedidoProposto, usando os mesmos handlers
+        que o usuário aciona à mão (assim as regras do GERAPED continuam valendo)."""
+        import preenchimento
+        preenchimento.preencher_bloco(self, proposto)
+
+    def tabela_para_documento(self, dados):
+        """TabelaPedido a inserir logo após este pedido no Word, ou None. `dados` = obter_dados()."""
+        if self.proposto is None or not self.var_tabela.get():
+            return None
+        from autopedidos.tabelas import tabela_do_pedido
+        self.proposto.dados['excluir_ntp'] = bool(dados.get('excluir_ntp'))
+        return tabela_do_pedido(self.proposto)
 
     def obter_dados(self):
         tese_key = nome_para_chave(self.combo_tese.get())
@@ -1313,6 +1470,8 @@ class BlocoPedido:
             'parametro_valor': parametro_valor,
             'campo_texto_valor': campo_texto_valor,
             'indice_singular': self.var_indice_singular.get() and self._indice_singular_aplicavel(),
+            # 1 benefício com mais de uma vigência (lido da petição): sempre "dos índices do FAP"
+            'indice_plural': bool(self.proposto is not None and self.proposto.dados.get('indice_plural')) and quantidade == 1,
             'excluir_ntp': self.var_excluir_ntp.get() and self._ntp_aplicavel(),
             'ntp_singular': self.var_ntp_singular.get() and self._ntp_singular_aplicavel(),
             'varios_estabelecimentos': self.var_varios_estabelecimentos.get() and self._varios_estabelecimentos_aplicavel(),
@@ -1340,6 +1499,7 @@ class Janela:
         self.root = root
         self.blocos = []
         self._ultimo_documento = None
+        self._arquivo_analise = None            # log de análise da petição carregada (ver autopedidos/registro.py)
         _res = caminho_recurso_fn or _caminho_recurso
         self._res = _res
         self._versao = self._ler_versao()
@@ -1380,12 +1540,17 @@ class Janela:
         botoes.pack(fill='x', side='bottom')
         _linha_divisoria(self._pagina_pedidos).pack(fill='x', side='bottom')
         _botao(botoes, "+ Adicionar pedido", self.adicionar_pedido).pack(side='left')
+        _botao(botoes, "Carregar petição", self.preencher_da_peticao, cor=tema.COR_SECUNDARIA).pack(
+            side='left', padx=(8, 0),
+        )
         _botao(botoes, "Limpar", self._limpar_tudo, cor=tema.COR_ERRO, estilo='link').pack(side='left', padx=(8, 0))
         _botao(botoes, "Gerar Word", self.gerar, cor=tema.COR_SECUNDARIA, estilo='cheio').pack(side='right')
         # só aparecem depois que existe um documento gerado
         self._botoes_resultado = _quadro(botoes, fundo=suave)
-        _botao(self._botoes_resultado, "Abrir documento", self._abrir_ultimo_documento, estilo='suave').pack(side='left', padx=(0, 8))
-        _botao(self._botoes_resultado, "Abrir pasta", self._abrir_pasta_ultimo_documento, estilo='suave').pack(side='left', padx=(0, 12))
+        # (estilo 'suave' tinha o mesmo cinza da barra e os botões pareciam texto solto; contorno, como
+        # os outros botões da barra, deixa claro que são clicáveis)
+        _botao(self._botoes_resultado, "Abrir documento", self._abrir_ultimo_documento).pack(side='left', padx=(0, 8))
+        _botao(self._botoes_resultado, "Abrir pasta", self._abrir_pasta_ultimo_documento).pack(side='left', padx=(0, 12))
 
         container = self._pagina_pedidos
 
@@ -1397,14 +1562,27 @@ class Janela:
             fundo=suave, cor=tema.COR_AJUDA,
         ).pack(anchor='w', padx=(28, 20), pady=(2, 16))
 
+        # faixa com o nome da petição carregada + botão para rever os apontamentos (só depois de carregar)
+        self._resultado_peticao = None
+        self._ntp_nao_aplicado = ()
+        self._faixa_peticao = _quadro(container, fundo=suave)
+        self._rotulo_peticao = _rotulo(
+            self._faixa_peticao, '', fundo=suave, cor=tema.COR_PRIMARIA, fonte=('Segoe UI', 10, 'bold'),
+        )
+        self._rotulo_peticao.pack(side='left')
+        _botao(self._faixa_peticao, '↻ Rever apontamentos', self._rever_apontamentos, padx=10).pack(
+            side='left', padx=(12, 0))
+
         self.canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0, background=tema.COR_FUNDO_SUAVE)
 
         def _ao_mover_scrollbar(*args):
-            self.canvas.yview(*args)
-            # Arrastar a barra chama canvas.yview diretamente - sem isso, arrastar o
-            # "polegar" (ou clicar na calha) conseguia mover o conteúdo mesmo quando ele já
-            # cabia inteiro na tela, já que só a roda do mouse (_ao_rolar) tinha essa trava.
-            self._atualizar_scrollregion()
+            # Arrastar a barra gera dezenas de eventos por segundo; o Windows só desenha (WM_PAINT) quando a
+            # fila de mensagens esvazia, então o conteúdo ficava em branco/remendado durante o arrasto.
+            # Aqui só guardamos a posição mais recente e aplicamos no máximo ~60x/s, desenhando de fato a cada vez.
+            self._yview_pendente = args
+            if not self._yview_agendado:
+                self._yview_agendado = True
+                self.root.after(16, self._aplicar_yview)
 
         scrollbar = tk.Scrollbar(container, orient='vertical', command=_ao_mover_scrollbar)
         self.frame_interno = ttk.Frame(self.canvas, style="Pagina.TFrame")
@@ -1426,6 +1604,8 @@ class Janela:
         # cada pixel arrastado é o que deixava o redimensionamento travado.
         self._tamanho_janela = None
         self._reexibir_pedidos = None
+        self._yview_pendente = None
+        self._yview_agendado = False
         marca = f'redimensionar{id(self)}'
         self.root.bindtags((marca,) + self.root.bindtags())
         self.root.bind_class(marca, '<Configure>', self._ao_redimensionar_janela)
@@ -1436,6 +1616,8 @@ class Janela:
         # lista suspensa da tese (é uma janela própria, mas "all" é realmente global). Preso
         # ao root, só dispara para widgets desta janela, deixando a lista suspensa em paz.
         self.root.bind('<MouseWheel>', self._ao_rolar)
+        for atalho in ('<Control-l>', '<Control-L>'):
+            self.root.bind(atalho, lambda e: self._abrir_log_de_analise())
 
         self.adicionar_pedido()
         # No arranque, a janela ainda não foi mapeada na tela quando adicionar_pedido() roda
@@ -1650,6 +1832,16 @@ class Janela:
             self.canvas.yview_moveto(0)
         return altura
 
+    def _aplicar_yview(self):
+        self._yview_agendado = False
+        args, self._yview_pendente = self._yview_pendente, None
+        if args:
+            self.canvas.yview(*args)
+            # sem isso, arrastar o "polegar" (ou clicar na calha) movia o conteúdo mesmo quando ele já cabia
+            # inteiro na tela, já que só a roda do mouse (_ao_rolar) tinha essa trava.
+            self._atualizar_scrollregion()
+            self.canvas.update()           # força o desenho agora (ver _ao_mover_scrollbar)
+
     def _conteudo_cabe_na_tela(self):
         return self._atualizar_scrollregion() <= self.canvas.winfo_height()
 
@@ -1696,6 +1888,118 @@ class Janela:
         for b in self.blocos:
             b.definir_ntp_disponivel(disponivel)
 
+    # ── Preencher a partir da petição inicial (.docx) ────────────────────────────────────
+
+    def preencher_da_peticao(self, caminho=None):
+        """Lê a petição (.docx, 100% local), propõe os pedidos e preenche os blocos. O usuário
+        revisa/edita tudo na tela como sempre; nada é gerado sem clicar em "Gerar Word"."""
+        if caminho is None:
+            caminho = filedialog.askopenfilename(
+                title='Petição inicial (.docx)', filetypes=[('Documento Word', '*.docx')],
+            )
+        if not caminho:
+            return
+        tem_dados = any(b.entry_item.get().strip() or b.entry_quantidade.get().strip() for b in self.blocos)
+        if tem_dados and not _confirmar(
+            self.root, 'Preencher da petição',
+            'Os pedidos já preenchidos serão substituídos pelos lidos da petição. Continuar?',
+        ):
+            return
+        self.root.configure(cursor='watch')
+        self.root.update_idletasks()
+        try:
+            import preenchimento
+            resultado = preenchimento.ler_peticao_para_blocos(caminho)
+        except Exception as exc:    # noqa: BLE001 - qualquer falha de leitura vira aviso ao usuário
+            self.root.configure(cursor='')
+            logger.exception('Falha ao ler a petição %s', os.path.basename(caminho))
+            try:
+                from autopedidos import registro
+                arquivo = registro.salvar_erro(self._pasta_do_programa(), caminho, exc, self._versao)
+                logger.info('Rastro do erro gravado em %s', arquivo)
+            except Exception:      # noqa: BLE001 - o log nunca derruba o programa
+                logger.exception('Não foi possível gravar o log do erro')
+            _erro(self.root, 'Não foi possível ler a petição', f'{type(exc).__name__}: {exc}')
+            return
+        self.root.configure(cursor='')
+        if not resultado.proposta.pedidos:
+            _avisar(self.root, 'Preencher da petição',
+                    'Não encontrei nenhuma tese com tabela de benefícios nesta petição. '
+                    'Verifique se é a petição inicial no modelo do escritório.')
+            return
+        for bloco in list(self.blocos):
+            bloco._casca.destroy()
+        self.blocos.clear()
+        for proposto in resultado.proposta.pedidos:
+            self.adicionar_pedido()
+            self.blocos[-1].preencher(proposto)
+        self._atualizar_disponibilidade_ntp()
+        ntp_nao_aplicado = preenchimento.aplicar_ntp(self.blocos)   # depois de saber se o NTP está liberado
+        self.root.update_idletasks()
+        self.canvas.yview_moveto(0)
+        self._atualizar_scrollregion()
+        self._resultado_peticao, self._ntp_nao_aplicado = resultado, ntp_nao_aplicado
+        self._mostrar_faixa_peticao(os.path.basename(caminho))
+        self._gravar_log_de_analise(caminho, resultado)
+        preenchimento.mostrar_resumo(self.root, resultado, self.blocos, ntp_nao_aplicado)
+
+    def _pasta_do_programa(self):
+        return os.environ.get('GERAPED_PASTA_LOGS') or os.path.dirname(_caminho_historico())
+
+    def _gravar_log_de_analise(self, caminho, resultado):
+        """Um arquivo por petição em logs/analises, com o porquê das decisões do programa."""
+        self._arquivo_analise = None
+        try:
+            from autopedidos import registro
+            self._arquivo_analise = registro.salvar_analise(
+                self._pasta_do_programa(), caminho, resultado.peticao, resultado.deteccao, resultado.proposta,
+                self._versao)
+            logger.info('Petição %s carregada: %d pedido(s); análise em %s', os.path.basename(caminho),
+                        len(resultado.proposta.pedidos), self._arquivo_analise)
+        except Exception:          # noqa: BLE001 - o log nunca derruba o programa
+            logger.exception('Não foi possível gravar o log de análise')
+
+    def _abrir_log_de_analise(self):
+        """Ctrl+L: abre o log de análise da petição carregada; sem petição, abre a pasta dos logs."""
+        try:
+            alvo = self._arquivo_analise
+            if not alvo or not os.path.isfile(alvo):
+                from autopedidos import registro
+                alvo = registro.pasta_de_analises(self._pasta_do_programa())
+            if sys.platform == 'win32':
+                os.startfile(str(alvo))
+            else:
+                import subprocess
+                subprocess.Popen(['xdg-open', str(alvo)])
+        except Exception as exc:    # noqa: BLE001
+            logger.exception('Não foi possível abrir o log de análise')
+            _avisar(self.root, 'Log de análise', f'Não foi possível abrir o log: {exc}')
+
+    def _anotar_geracao_no_log(self, pedidos, caminho_docx):
+        if not self._arquivo_analise or self._resultado_peticao is None:
+            return
+        try:
+            from autopedidos import registro
+            registro.anotar_geracao(self._arquivo_analise, self._resultado_peticao.proposta, self.blocos, pedidos,
+                                    caminho_docx)
+        except Exception:          # noqa: BLE001
+            logger.exception('Não foi possível anotar a geração no log de análise')
+
+    def _mostrar_faixa_peticao(self, nome):
+        """Nome da petição carregada, visível na tela."""
+        if nome:
+            self._rotulo_peticao.configure(text=f'Petição: {nome}')
+            self._faixa_peticao.pack(fill='x', padx=(28, 20), pady=(0, 10), before=self.canvas)
+        else:
+            self._faixa_peticao.pack_forget()
+
+    def _rever_apontamentos(self):
+        """Abre de novo a janela de apontamentos da última petição carregada (com o estado atual dos pedidos)."""
+        if self._resultado_peticao is None:
+            return
+        import preenchimento
+        preenchimento.mostrar_resumo(self.root, self._resultado_peticao, self.blocos, self._ntp_nao_aplicado)
+
     # ── Limpar tudo ───────────────────────────────────────────────────────────
 
     def _limpar_tudo(self):
@@ -1708,6 +2012,9 @@ class Janela:
         for bloco in list(self.blocos):
             bloco._casca.destroy()
         self.blocos.clear()
+        self._resultado_peticao, self._ntp_nao_aplicado = None, ()
+        self._arquivo_analise = None
+        self._mostrar_faixa_peticao('')
         self.adicionar_pedido()
 
     # ── Último documento gerado ──────────────────────────────────────────────
@@ -1849,7 +2156,7 @@ class Janela:
     def _mostrar_manual(self):
         janela = tk.Toplevel(self.root)
         janela.title('Manual rápido')
-        _centralizar_janela(janela, self.root, 620, 560)
+        _centralizar_janela(janela, self.root, 620, 560, DESLOCAMENTO_JANELAS - int(self.root.winfo_fpixels('1c')))
         janela.transient(self.root)
         janela.grab_set()
         janela.resizable(True, True)
@@ -1943,7 +2250,7 @@ class Janela:
 
         janela = tk.Toplevel(self.root)
         janela.title('Notas de atualização')
-        _centralizar_janela(janela, self.root, 560, 520)
+        _centralizar_janela(janela, self.root, 560, 520, DESLOCAMENTO_JANELAS - int(self.root.winfo_fpixels('1c')))
         janela.transient(self.root)
         janela.grab_set()
         janela.resizable(True, True)
@@ -2117,8 +2424,16 @@ class Janela:
             return
 
         try:
-            doc = gerar_documento(pedidos)
+            # Pedidos vindos da petição trazem a tabela ("abaixo arrolados") logo após o texto; os
+            # preenchidos à mão não têm tabela e saem exatamente como antes (gerar_documento do GERAPED).
+            tabelas = [bloco.tabela_para_documento(dados) for bloco, dados in zip(self.blocos, pedidos)]
+            if any(t is not None for t in tabelas):
+                from autopedidos.documento import gerar_documento_com_tabelas_lista
+                doc = gerar_documento_com_tabelas_lista(pedidos, tabelas)
+            else:
+                doc = gerar_documento(pedidos)
         except Exception as exc:
+            logger.exception('Falha ao gerar o Word')
             _erro(self.root, 'Erro ao gerar', str(exc))
             return
 
@@ -2131,6 +2446,7 @@ class Janela:
             if not caminho:
                 return
             doc.save(caminho)
+            self._anotar_geracao_no_log(pedidos, caminho)
             self._ultimo_documento = caminho
             self._botoes_resultado.pack(side='right')
             self._registrar_historico(caminho)

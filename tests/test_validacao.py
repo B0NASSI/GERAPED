@@ -97,7 +97,7 @@ class TestValidarEspecies:
         validar_especies('convertido', ['B31', 'B36'], quantidade=2)
 
     def test_convertido_bloqueia_especie_fora_da_lista_permitida(self):
-        with pytest.raises(ValueError, match='B31, B36'):
+        with pytest.raises(ValueError, match='B31, B32, B36'):
             validar_especies('convertido', ['B91'], quantidade=1)
 
 
@@ -175,3 +175,8 @@ class TestVigenciaLiberaNtp:
     @pytest.mark.parametrize('texto', ['2018', '2020, 2021', '', None, 'xxxx', '17'])
     def test_nenhuma_vigencia_ate_2017(self, texto):
         assert vigencia_libera_ntp(texto) is False
+
+
+def test_convertido_aceita_b32_e_nas_outras_teses_ele_nao_e_permitido():
+    validar_especies('convertido', ['B32'], quantidade=1)
+    validar_especies('convertido', ['B31', 'B32', 'B36'], quantidade=3)

@@ -10,6 +10,7 @@
 9. Sobreposição e concomitância de benefícios= SOBREPOSIÇÃO
 9.1. NTP sem CAT vinculada, considerado em duplicidade= NTP DUPLICADO
 9.2. CAT em duplicidade para o mesmo acidente= CAT DUPLICADA
+9.3. Benefício acidentário computado duas vezes pelo INSS= BENEFÍCIO DUPLICADO
 
 Novas a implementar:
 11. Rotatividade= ROTATIVIDADE

@@ -114,7 +114,7 @@ def _descricao_item(tese, especies, singular):
 
 def montar_clausula_principal(
     paragrafo, quantidade, especies, tese_key, item_peticao, parametro_valor=None,
-    indice_singular=False, excluir_ntp=False, ntp_singular=False,
+    indice_singular=False, excluir_ntp=False, ntp_singular=False, indice_plural=False,
 ):
     tese = TESES[tese_key]
     singular = quantidade == 1
@@ -148,7 +148,8 @@ def montar_clausula_principal(
     # no singular independente da quantidade.
     base_calculo = tese.get('base_calculo')
     if base_calculo is None:
-        indice = 'do índice do FAP' if singular or indice_singular else 'dos índices do FAP'
+        # regra do escritório: 1 benefício com MAIS DE UMA vigência => sempre "dos índices do FAP" (indice_plural)
+        indice = 'do índice do FAP' if (singular and not indice_plural) or indice_singular else 'dos índices do FAP'
         base_calculo = f'da base de cálculo {indice}'
     _add_run(paragrafo, f', {arrolado}, {base_calculo}, ')
     _add_run(paragrafo, _motivo(tese, singular, parametro_valor), bold=True)
@@ -198,12 +199,14 @@ def montar_clausula_custo_cessado(paragrafo, quantidade, especies, item_peticao,
     _add_item_referencia(paragrafo, item_peticao)
 
 
-def montar_clausula_correcao_com_vigencia(paragrafo, tese, item_peticao, vigencias):
+def montar_clausula_correcao_com_vigencia(paragrafo, tese, item_peticao, vigencias, varios_estabelecimentos=False):
     _add_run(paragrafo, 'Determinar a ')
     _add_run(paragrafo, 'correção', bold=True)
     _add_run(paragrafo, ' ')
     _add_run(paragrafo, tese['texto_principal'], bold=True)
-    _add_run(paragrafo, ', nas competências do estabelecimento e vigências indicadas na tabela abaixo')
+    # 2+ estabelecimentos (CNPJs): "dos estabelecimentos" (antes ficava sempre "do estabelecimento")
+    estabelecimento = 'dos estabelecimentos' if varios_estabelecimentos else 'do estabelecimento'
+    _add_run(paragrafo, f', nas competências {estabelecimento} e vigências indicadas na tabela abaixo')
 
     _add_item_referencia(paragrafo, item_peticao)
 
@@ -263,6 +266,7 @@ def montar_clausula(paragrafo, pedido):
     if tipo == 'correcao_com_vigencia':
         montar_clausula_correcao_com_vigencia(
             paragrafo, tese, pedido['item_peticao'], pedido.get('campo_texto_valor'),
+            varios_estabelecimentos=pedido.get('varios_estabelecimentos', False),
         )
         return
 
@@ -279,6 +283,7 @@ def montar_clausula(paragrafo, pedido):
         indice_singular=pedido.get('indice_singular', False),
         excluir_ntp=pedido.get('excluir_ntp', False),
         ntp_singular=pedido.get('ntp_singular', False),
+        indice_plural=pedido.get('indice_plural', False),
     )
 
 
@@ -292,13 +297,104 @@ def _formatar_lista_especies(especies):
     return ', '.join(especies[:-1]) + f' e {especies[-1]}'
 
 
-def montar_grupo_subsidiario(paragrafo, grupo, primeiro, ultimo):
-    if not primeiro:
+def _beneficios_do_grupo(grupo):
+    """Chave para saber se duas teses subsidiárias falam dos MESMOS benefícios."""
+    if grupo.get('todos_beneficios_principal'):
+        return ('todos',)
+    return ('numeros', frozenset(grupo['numeros_com_especie']))
+
+
+def _grupo_no_singular(grupo):
+    if grupo.get('todos_beneficios_principal'):
+        return grupo.get('quantidade_principal') == 1
+    return len(grupo['numeros_com_especie']) == 1
+
+
+# Quando a tese subsidiária CONTINUA a frase sobre os mesmos benefícios ("... – ou, alternativamente,
+# por ser decorrente de ..."), o motivo precisa de um verbo: "decorrente(s)", "concedido(s)" e
+# "implantado(s)" sozinhos ficariam sem sentido sem o "benefício X" antes deles.
+_MOTIVO_COM_VERBO = (
+    ('decorrentes', 'por serem '), ('decorrente', 'por ser '),
+    ('concedidos', 'por terem sido '), ('concedido', 'por ter sido '),
+    ('implantados', 'por terem sido '), ('implantado', 'por ter sido '),
+)
+
+
+def _motivo_encadeado(motivo):
+    for inicio, verbo in _MOTIVO_COM_VERBO:
+        if motivo.startswith(inicio):
+            return verbo + motivo
+    return motivo
+
+
+def _e_custo(grupo):
+    """Custo cessado: o pedido NÃO é de exclusão do benefício, e sim de CORREÇÃO do índice de custo."""
+    return TESES[grupo['tese_subsidiaria_key']].get('tipo_clausula') == 'custo_cessado'
+
+
+def _escrever_acao(paragrafo, grupo, com_artigo, sem_beneficio=False):
+    """"exclusão" (padrão) ou "correção no cálculo do índice de custo" (custo cessado).
+    `com_artigo`: escreve "a " antes (quando a ação muda no meio da frase, ex.: "–, e a correção...");
+    `sem_beneficio`: nenhuma citação de benefício vem logo depois, então fecha com vírgula."""
+    if com_artigo:
+        _add_run(paragrafo, 'a ')
+    if _e_custo(grupo):
+        _add_run(paragrafo, 'correção', bold=True)
+        _add_run(paragrafo, ' no cálculo do índice de custo' + (', ' if sem_beneficio else ' '))
+    else:
+        _add_run(paragrafo, 'exclusão', bold=True)
+        _add_run(paragrafo, ', ' if sem_beneficio else ' ')
+
+
+def _escrever_motivo(paragrafo, grupo, singular, encadeado=False):
+    """Motivo da exclusão ou, no custo cessado, a condição da correção (período DIB-DCB, data limite e
+    o novo valor do campo "TOTAL PAGO" - mesmo texto do pedido principal de custo cessado)."""
+    if _e_custo(grupo):
+        _add_run(paragrafo, 'limitando a apuração do valor ao período compreendido entre a DIB e a DCB, ')
+        _add_run(paragrafo, CUSTO_CESSADO_MOTIVO[grupo.get('parametro_valor')], bold=True)
+        _add_run(paragrafo, ', devendo ser considerado o novo valor para o campo "TOTAL PAGO" do sistema FAP')
+        return
+    motivo = _motivo(TESES[grupo['tese_subsidiaria_key']], singular=singular,
+                     parametro_valor=grupo.get('parametro_valor'))
+    _add_run(paragrafo, _motivo_encadeado(motivo) if encadeado else motivo, bold=True)
+
+
+def _grupo_ja_coberto(grupo, vistos, todos_visto):
+    """True se TODOS os benefícios do grupo já foram citados em teses subsidiárias anteriores: então é uma
+    ALTERNATIVA a elas. Benefício que ainda não apareceu = tese subsidiária nova."""
+    if todos_visto:
+        return True
+    if grupo.get('todos_beneficios_principal'):
+        return False
+    return bool(grupo['numeros_com_especie']) and set(grupo['numeros_com_especie']) <= vistos
+
+
+def montar_grupo_subsidiario(paragrafo, grupo, primeiro, ultimo, anterior=None, alternativa=None):
+    """Regra do escritório: "Subsidiariamente" aparece UMA vez, no começo; a partir daí, qualquer outra
+    tese sobre um benefício JÁ citado é "ou, alternativamente" (`alternativa`, calculada em
+    adicionar_clausula_subsidiaria). Se ela fala dos mesmos benefícios da tese imediatamente anterior, o
+    benefício não é repetido: "... – item 6 da petição inicial – ou, alternativamente, por ser decorrente
+    de ... – item 7 da petição inicial". Qualquer quantidade de teses."""
+    mudou_acao = anterior is not None and _e_custo(grupo) != _e_custo(anterior)
+    mesmos_da_anterior = (not primeiro and anterior is not None
+                          and _beneficios_do_grupo(grupo) == _beneficios_do_grupo(anterior))
+    if alternativa is None:                  # chamada direta, sem o contexto dos demais grupos
+        alternativa = mesmos_da_anterior
+
+    if not primeiro and alternativa:
+        _add_run(paragrafo, ' – ou, alternativamente, ')
+        if mudou_acao:
+            _escrever_acao(paragrafo, grupo, com_artigo=True, sem_beneficio=mesmos_da_anterior)
+        if mesmos_da_anterior:
+            _escrever_motivo(paragrafo, grupo, _grupo_no_singular(grupo), encadeado=not mudou_acao)
+            _add_item_referencia(paragrafo, grupo['item_peticao'])
+            return
+        # alternativa a uma tese que NÃO é a imediatamente anterior: cita o(s) benefício(s) abaixo
+    elif not primeiro:
         separador = ' –, e ' if ultimo else ' –, '
         _add_run(paragrafo, separador)
-
-    tese = TESES[grupo['tese_subsidiaria_key']]
-    parametro_valor = grupo.get('parametro_valor')
+        if mudou_acao:                       # ex.: exclusão ... –, e a correção no cálculo do índice de custo ...
+            _escrever_acao(paragrafo, grupo, com_artigo=True)
 
     if grupo.get('todos_beneficios_principal'):
         # Nenhum benefício informado neste grupo - subsidiário se aplica a todos os
@@ -309,26 +405,35 @@ def montar_grupo_subsidiario(paragrafo, grupo, primeiro, ultimo):
         lista = _formatar_lista_especies(grupo['especies_principal'])
         rotulo = 'do benefício' if singular else 'dos benefícios'
         _add_run(paragrafo, f'{rotulo} {lista}, ')
-        _add_run(paragrafo, _motivo(tese, singular=singular, parametro_valor=parametro_valor), bold=True)
+        _escrever_motivo(paragrafo, grupo, singular)
     else:
         partes = _formatar_lista_beneficios(grupo['numeros_com_especie'])
         if len(partes) == 1:
             _add_run(paragrafo, f'do benefício {partes[0]}, ')
-            _add_run(paragrafo, _motivo(tese, singular=True, parametro_valor=parametro_valor), bold=True)
+            _escrever_motivo(paragrafo, grupo, True)
         else:
             lista = ', '.join(partes[:-1]) + f' e {partes[-1]}'
             _add_run(paragrafo, f'dos benefícios {lista}, ')
-            _add_run(paragrafo, _motivo(tese, singular=False, parametro_valor=parametro_valor), bold=True)
+            _escrever_motivo(paragrafo, grupo, False)
 
     _add_item_referencia(paragrafo, grupo['item_peticao'])
 
 
 def adicionar_clausula_subsidiaria(paragrafo, grupos_subsidiarios):
     _add_run(paragrafo, 'Subsidiariamente, não sendo esse o entendimento de V. Exa., requer-se a ')
-    _add_run(paragrafo, 'exclusão ', bold=True)
+    _escrever_acao(paragrafo, grupos_subsidiarios[0], com_artigo=False)     # "exclusão" ou "correção do custo"
     total = len(grupos_subsidiarios)
+    vistos, todos_visto = set(), False       # benefícios já citados em teses subsidiárias anteriores
     for i, grupo in enumerate(grupos_subsidiarios):
-        montar_grupo_subsidiario(paragrafo, grupo, primeiro=(i == 0), ultimo=(i == total - 1))
+        montar_grupo_subsidiario(
+            paragrafo, grupo, primeiro=(i == 0), ultimo=(i == total - 1),
+            anterior=grupos_subsidiarios[i - 1] if i else None,
+            alternativa=_grupo_ja_coberto(grupo, vistos, todos_visto),
+        )
+        if grupo.get('todos_beneficios_principal'):
+            todos_visto = True
+        else:
+            vistos |= set(grupo['numeros_com_especie'])
 
 
 def gerar_documento(pedidos):

@@ -12,14 +12,15 @@ TIPO_BENEFICIO_POR_ESPECIE = {
     'B92': 'aposentadoria por incapacidade permanente por acidente de trabalho',
     'B93': 'pensão por morte acidentária',
     'B94': 'auxílio-acidente por acidente de trabalho',
-    'B31': 'auxílio por incapacidade temporária previdenciária',
+    'B31': 'auxílio por incapacidade temporária previdenciário',
+    'B32': 'aposentadoria por incapacidade permanente previdenciário',
     'B36': 'auxílio-acidente previdenciário',
 }
 
 # B31/B36 são benefícios PREVIDENCIÁRIOS; B91-B94 são ACIDENTÁRIOS (nome dado quando duas ou
 # mais espécies são citadas juntas - ver _descricao_beneficios em gerador_pedido.py, que com
 # uma só espécie usa o texto completo de TIPO_BENEFICIO_POR_ESPECIE em vez desse adjetivo).
-ESPECIES_PREVIDENCIARIAS = {'B31', 'B36'}
+ESPECIES_PREVIDENCIARIAS = {'B31', 'B32', 'B36'}
 
 TESES = {
     'acidente_trajeto': {
@@ -35,8 +36,9 @@ TESES = {
     'acidente_outro_estabelecimento': {
         'nome': 'OUTRO ESTABELECIMENTO',
         'motivo_singular': 'decorrente de acidente ocorrido em outro estabelecimento',
-        # plural inferido (template só mostra o singular) - ajustar se aparecer um caso real
-        'motivo_plural': 'decorrentes de acidentes ocorridos em outro estabelecimento',
+        # plural CONFIRMADO em petições reais (5 de 5 usam "outros estabelecimentos"); o texto anterior
+        # mantinha "outro estabelecimento" no singular mesmo no plural.
+        'motivo_plural': 'decorrentes de acidentes ocorridos em outros estabelecimentos',
     },
     'ausencia_nexo_causal_concausalidade': {
         'nome': 'NEXO AFASTADO',
@@ -64,7 +66,7 @@ TESES = {
         'motivo_plural': 'por se tratar de benefícios de natureza previdenciária',
         # só faz sentido para benefícios previdenciários (não acidentários) - restringe as
         # espécies selecionáveis na UI (ver _atualizar_estado_especies em interface.py)
-        'especies_permitidas': ['B31', 'B36'],
+        'especies_permitidas': ['B31', 'B32', 'B36'],
     },
     'concomitancia_outro_beneficio': {
         'nome': 'CONCOMITANTE',
@@ -111,6 +113,15 @@ TESES = {
         # pedido do escritório: essa tese não admite benefício subsidiário - checkbox
         # "Possui pedido subsidiário?" fica desabilitado na UI (ver interface.py)
         'permite_subsidiario': False,
+    },
+    'computado_duas_vezes': {
+        'nome': 'BENEFÍCIO DUPLICADO',
+        # serve para qualquer benefício acidentário (B91-B94); as espécies vêm da planilha. Petições reais:
+        # "benefício de auxílio-acidente ... espécie B94, abaixo arrolado ..., por ter sido computado duas
+        # vezes" (o INSS cessa um benefício e implanta outro no dia seguinte pelo mesmo acidente).
+        # Plural inferido por simetria - ajustar se aparecer um caso real.
+        'motivo_singular': 'por ter sido computado duas vezes',
+        'motivo_plural': 'por terem sido computados duas vezes',
     },
     'sobreposicao_concomitancia_beneficios': {
         'nome': 'SOBREPOSIÇÃO',

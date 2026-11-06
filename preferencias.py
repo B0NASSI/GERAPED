@@ -31,6 +31,7 @@ ORDEM_PADRAO = [
     'sobreposicao_concomitancia_beneficios',
     'ntp_duplicado',
     'cat_duplicada',
+    'computado_duas_vezes',
     'erro_vinculos',
     'erro_massa_salarial',
     'rotatividade',

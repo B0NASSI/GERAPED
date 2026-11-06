@@ -171,6 +171,17 @@ class TestCustoCessado:
         assert 'esta correspondente ao dia imediatamente anterior ao óbito' in t
 
 
+class TestComputadoDuasVezes:
+    def test_singular_igual_ao_das_peticoes_reais(self):
+        t = texto(pedido_base(tese_key='computado_duas_vezes', especies=['B94'], item_peticao='6',
+                              indice_singular=True))
+        assert t == (
+            'Determinar a exclusão de 1 (um) benefício de auxílio-acidente por acidente de trabalho, '
+            'espécie B94, abaixo arrolado, da base de cálculo do índice do FAP, por ter sido '
+            'computado duas vezes – item 6 da petição inicial.'
+        )
+
+
 class TestNtpDuplicado:
     def test_singular(self):
         t = texto(pedido_base(tese_key='ntp_duplicado', especies=[], item_peticao='16'))
@@ -366,3 +377,10 @@ class TestContestacaoVariosEstabelecimentos:
             tese_key='prescricao_quinquenal', especies=[], campo_texto_valor='2016', varios_estabelecimentos=True,
         ))
         assert 'em razão da prescrição quinquenal, nos termos da fundamentação' in t
+
+
+def test_b32_convertido_singular_e_plural():
+    t = texto(pedido_base(quantidade=1, especies=['B32'], tese_key='convertido'))
+    assert '1 (um) benefício de aposentadoria por incapacidade permanente previdenciário, espécie B32' in t
+    t = texto(pedido_base(quantidade=2, especies=['B31', 'B32'], tese_key='convertido'))
+    assert '2 (dois) benefícios previdenciários, espécies B31 e B32' in t

@@ -103,7 +103,7 @@ if __name__ == '__main__':
     log_setup.configurar_logging('geraped.log', _pasta_executavel())
     logger.info('GERAPED iniciado.')
     _ativar_dpi_awareness()
-    LARGURA, ALTURA = 1000, 888
+    LARGURA, ALTURA = 1165, 890       # a tela de pedidos ganhou a faixa da petição carregada
 
     root = ttkbootstrap.Window(themename='litera')
     root.title('GERAPED - Gerador de Pedidos')
