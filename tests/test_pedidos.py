@@ -365,6 +365,22 @@ def test_restabelecimento_marcacao_do_item_vale_sobre_as_datas():
     assert any('marca o NB 111111111' in n for n in notas)
 
 
+def test_restabelecimento_dois_pares_do_mesmo_segurado_mantem_todos_os_tracos():
+    """Caso Angeloni: B31 "-" -> B91 "2" -> B31 "-" -> B91 "3" do mesmo NIT. Os dois B31 marcados com "-"
+    são anteriores e ficam; cada B91 é posterior ao "-" logo acima dele."""
+    from autopedidos.beneficios import Beneficio
+    from autopedidos.pedidos import _beneficios_excluidos
+    a1 = Beneficio(numero='6455139198', especie='B31', nit='1', dib='03/02/2021', dcb='25/04/2021', ordem=0, item='-')
+    r1 = Beneficio(numero='6347969479', especie='B91', nit='1', dib='26/04/2021', dcb='03/07/2021', ordem=1, item='2')
+    a2 = Beneficio(numero='6400451360', especie='B31', nit='1', dib='08/11/2021', dcb='12/04/2022', ordem=2, item='-')
+    r2 = Beneficio(numero='6388465289', especie='B91', nit='1', dib='13/04/2022', dcb='31/01/2023', ordem=3, item='3')
+    escolhidos, _, _ = _beneficios_excluidos('restabelecimento_beneficio_anterior', [a1, r1, a2, r2])
+    assert [x.numero for x in escolhidos] == ['6347969479', '6388465289']
+    assert 'posterior ao NB 6455139198' in r1.decisao
+    assert 'posterior ao NB 6400451360' in r2.decisao
+    assert a2.decisao.startswith('benefício anterior')
+
+
 def test_restabelecimento_sem_marcacao_padrao_continua_por_data():
     from autopedidos.beneficios import Beneficio
     from autopedidos.pedidos import _beneficios_excluidos

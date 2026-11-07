@@ -1,8 +1,8 @@
 #define MyAppName "GERAPED — Gerador de Pedidos"
-#define MyAppVersion "1.4.1"
+#define MyAppVersion "1.4.2"
 #define MyAppPublisher "Rodriguez & Sousa Advogados Associados"
 #define MyAppExeName "GERAPED Launcher.exe"
-#define SourceDir "..\GERAPED - Instalador"
+#define SourceDir "C:\Users\Pichau\Desktop\CODE\CLAUDE CODE\GeradorPedidoFAP\GERAPED - Instalador"
 
 [Setup]
 AppId={{9C4E2A7D-1F6B-4A3C-8E5D-2B7F0C9A4D6E}

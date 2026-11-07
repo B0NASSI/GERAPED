@@ -159,26 +159,40 @@ def _beneficios_excluidos(tese_key, lista):
                              else sorted(g, key=lambda b: b.ordem))
                 criterio = ('ordem da tabela (DIB posterior à DCB em algum benefício)' if datas_incoerentes else
                             'menor DIB' if all(b.dib for b in g) else 'ordem da tabela (faltam datas na planilha)')
-                # Marcação explícita da planilha: exatamente um "-" (o anterior) e os demais com número
-                # de item (os excluídos). Vale sobre qualquer data; sem esse padrão, vale a ordenação acima.
+                # Marcação explícita da planilha: "-" na coluna Item = benefício anterior (fica), número =
+                # excluído. Vale sobre qualquer data; sem esse padrão, vale a ordenação acima.
                 tracos = [b for b in g if b.item.strip() == '-']
-                if len(tracos) == 1 and len(g) > 1 and all(b.item.strip().isdigit() for b in g if b is not tracos[0]):
-                    if ordenados[0] is not tracos[0] and not datas_incoerentes and all(b.dib for b in g):
-                        notas.append(f'As datas da planilha indicam o NB {ordenados[0].numero} como o mais antigo, '
-                                     f'mas a planilha marca o NB {tracos[0].numero} como o benefício anterior '
-                                     '("-" na coluna Item): vale a marcação. Confira as datas.')
-                    ordenados = tracos + [b for b in ordenados if b is not tracos[0]]
+                numerados = [b for b in g if b.item.strip() != '-']
+                anterior_de = {id(b): ordenados[0] for b in ordenados[1:]}
+                if tracos and numerados and all(b.item.strip().isdigit() for b in numerados):
+                    if len(tracos) == 1:
+                        if ordenados[0] is not tracos[0] and not datas_incoerentes and all(b.dib for b in g):
+                            notas.append(f'As datas da planilha indicam o NB {ordenados[0].numero} como o mais antigo, '
+                                         f'mas a planilha marca o NB {tracos[0].numero} como o benefício anterior '
+                                         '("-" na coluna Item): vale a marcação. Confira as datas.')
+                        ordenados = tracos + [b for b in ordenados if b is not tracos[0]]
+                        anterior_de = {id(b): tracos[0] for b in numerados}
+                    else:
+                        # vários "-" no mesmo segurado (ex.: dois pares B31 -> B91): todo "-" é um anterior
+                        # e fica; cada numerado é o restabelecimento do "-" logo acima dele na tabela
+                        ordenados = sorted(g, key=lambda b: b.ordem)
+                        ultimo, anterior_de = min(tracos, key=lambda b: b.ordem), {}
+                        for b in ordenados:
+                            if b.item.strip() == '-':
+                                ultimo = b
+                            else:
+                                anterior_de[id(b)] = ultimo
                     criterio = 'marcação "-" na coluna Item da planilha'
-                if id(ordenados[0]) in ids:
-                    anteriores.append(ordenados[0].especie)
                 for i, b in enumerate(ordenados):
-                    if i == 0:
+                    if id(b) not in anterior_de:
                         b.decisao = f'benefício anterior (não excluído): critério {criterio}'
-                    elif id(b) in ids:
-                        b.decisao = f'excluído: posterior ao NB {ordenados[0].numero} (critério {criterio})'
-                for i, b in enumerate(ordenados[1:], 1):
-                    b.vigs_anteriores = _anos_fap_anteriores(ordenados[:i])
-                escolhidos += [b for b in ordenados[1:] if id(b) in ids]
+                        if id(b) in ids:
+                            anteriores.append(b.especie)
+                    else:
+                        b.vigs_anteriores = _anos_fap_anteriores(ordenados[:i])
+                        if id(b) in ids:
+                            b.decisao = f'excluído: posterior ao NB {anterior_de[id(b)].numero} (critério {criterio})'
+                escolhidos += [b for b in ordenados if id(b) in anterior_de and id(b) in ids]
             notas.append('Vários benefícios do mesmo segurado: o mais antigo foi tratado como o benefício '
                          'anterior (não excluído) e os posteriores como os excluídos.')
             lista = escolhidos
