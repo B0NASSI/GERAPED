@@ -1,4 +1,0 @@
-GERAPED 1.4.1
-
-- CAT NÃO VINCULADA e NTP DUPLICADO: a coluna "NTP do benefício" ficou mais larga, e o título e o número cabem numa linha só.
-- Manual rápido: o aviso "Confira sempre" aparece em negrito.
