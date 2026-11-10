@@ -1,0 +1,4 @@
+GERAPED 1.2
+
+- Tese subsidiária agora abre sem nenhum benefício adicionado.
+- Ao adicionar um benefício, o número dele passa a ser obrigatório.

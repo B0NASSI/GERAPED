@@ -1,0 +1,13 @@
+GERAPED 1.1
+
+Teste do sistema de atualização automática (launcher).
+
+- Validação de teses subsidiárias: com mais de um benefício informado numa
+  mesma tese subsidiária, o número de cada um passa a ser obrigatório, e
+  nenhuma tese subsidiária pode ter mais benefícios do que a quantidade do
+  pedido principal.
+- Botão "Notas de atualização" na barra de topo, mostrando o changelog da
+  versão instalada (com texto justificado).
+- Correção de rolagem: a lista de pedidos não pula mais de posição ao usar
+  a roda do mouse ou a barra de rolagem quando o conteúdo já cabe na tela.
+- Nova espécie de benefício B36 (auxílio-acidente previdenciário).

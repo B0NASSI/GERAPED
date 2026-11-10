@@ -1,0 +1,4 @@
+GERAPED 1.4.3
+
+- CONTESTAÇÃO ADMINISTRATIVA: novo texto do pedido, que agora declara a inexistência de prescrição em relação às competências da vigência não alcançadas pela prescrição quinquenal.
+- CONTESTAÇÃO ADMINISTRATIVA: saiu a opção "Mais de um estab./vigência", que não é mais necessária.

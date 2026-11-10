@@ -1,0 +1,21 @@
+GERAPED 1.0
+
+Primeira versão, com instalador e atualização automática.
+
+- Monte pedidos de exclusão de benefícios do FAP escolhendo a tese, a quantidade
+  e a(s) espécie(s), e gere o texto pronto em Word.
+- Teses disponíveis: Trajeto, 60 dias, Outro estabelecimento, Nexo afastado,
+  Outra empresa, Benefício previdenciário, Concomitante, Pré-FAP, Sobreposição,
+  DIB=DCB, Benefício cancelado/revogado, CAT não vinculada, Erro de implantação,
+  Rotatividade, Erro de massa salarial, Erro de vínculos, Custo cessado,
+  Prescrição quinquenal e Contestação administrativa.
+- Suporte a teses subsidiárias (cláusula alternativa, caso a principal não seja
+  acatada), inclusive encadeando várias teses subsidiárias em um mesmo pedido.
+- Tese subsidiária sem benefícios próprios informados herda automaticamente
+  todos os benefícios do pedido principal (quando a quantidade for maior que 1).
+- Validações para evitar pedidos inconsistentes: item da petição repetido entre
+  pedidos principais, mais espécies do que benefícios, e mais benefícios do que
+  a quantidade do pedido principal em uma tese subsidiária.
+- Tela de "Opções" para personalizar a ordem das teses nos comboboxes.
+- Histórico dos últimos documentos gerados, com atalho para reabrir a pasta ou
+  o arquivo.
