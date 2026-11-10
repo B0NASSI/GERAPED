@@ -1,3 +1,0 @@
-GERAPED 1.4.2
-
-- 60 DIAS: correção na leitura da petição quando o mesmo segurado tem mais de um benefício anterior marcado com "-" na tabela. Nesse caso, um dos benefícios anteriores entrava no pedido por engano.

@@ -1,6 +1,0 @@
-GERAPED 1.3.1
-
-- Aplicativo muito mais rápido: redimensionar a janela e adicionar pedidos, teses subsidiárias e benefícios ficou várias vezes mais ágil.
-- Nova opção "Índice do FAP no singular": com 2 ou mais benefícios do mesmo estabelecimento e vigência, o pedido mantém "do índice do FAP" em vez de "dos índices do FAP".
-- Nova opção "Incluir exclusão dos NTP": acrescenta ", bem como a exclusão dos Nexos Técnicos Previdenciários (NTP)" logo após o item do pedido, com opção de deixar o NTP no singular. Só aparece quando algum pedido de CONTESTAÇÃO ADMINISTRATIVA cita vigência de 2017 ou anterior.
-- CONTESTAÇÃO ADMINISTRATIVA: nova opção "Mais de um estabelecimento", que muda o texto para "atribuído às contestações administrativas".
